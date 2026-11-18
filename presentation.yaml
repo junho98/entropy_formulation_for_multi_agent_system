@@ -1,0 +1,10 @@
+title: New Presentation
+author: AI
+
+theme: default
+
+export:
+  pdf: true
+  png: false
+
+port: 3030

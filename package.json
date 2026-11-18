@@ -1,0 +1,13 @@
+{
+  "name": "slidev-presentation",
+  "private": true,
+  "scripts": {
+    "dev": "slidev --remote",
+    "export": "slidev export",
+    "export:png": "slidev export --format png"
+  },
+  "dependencies": {
+    "@slidev/cli": "latest",
+    "@slidev/theme-default": "latest"
+  }
+}

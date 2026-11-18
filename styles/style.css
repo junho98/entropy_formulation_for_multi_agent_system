@@ -1,0 +1,459 @@
+/* ============================================================
+   AAIL Academic Slidev Theme
+   Navy cover + clean white body
+   ============================================================ */
+
+/* Variables scoped broadly so every slide inherits them.
+   :root alone can miss Slidev's isolated slide layouts, so we
+   also attach to the app root and slide layout. */
+:root,
+#slidev-app,
+.slidev-layout {
+  --aail-navy: #2b3447;
+  --aail-navy-deep: #232b3a;
+  --aail-gray: #6b7280;
+  --aail-accent: #3b82f6;
+  --aail-red: #dc2626;
+  --aail-green: #059669;
+  --aail-text: #1f2937;
+}
+
+/* Base typography */
+.slidev-layout {
+  font-family: 'Inter', 'Helvetica Neue', Arial, 'Noto Sans KR', sans-serif;
+  color: var(--aail-text);
+  padding: 2.2rem 3rem;
+}
+
+.slidev-layout h1 {
+  font-weight: 800;
+  color: var(--aail-text);
+  font-size: 2.1rem;
+  letter-spacing: -0.01em;
+  margin-bottom: 0.2rem;
+}
+
+/* h2 is the `sub:` line under the navy band: the band names the section, this
+   names the slide's topic. It outranks body text (1.02rem) and takes the band's
+   navy so the two read as one header. */
+.slidev-layout h2 {
+  font-weight: 700;
+  color: var(--aail-navy);
+  font-size: 1.45rem;
+  margin-top: 0.1rem;
+  margin-bottom: 0.65rem;
+}
+
+.slidev-layout h3 {
+  font-weight: 600;
+  color: var(--aail-navy);
+  font-size: 1rem;
+}
+
+.slidev-layout p,
+.slidev-layout li {
+  font-size: 1.02rem;
+  line-height: 1.55;
+}
+
+/* Tighter default spacing so content slides don't blow past the
+   980x551 canvas vertically. */
+.slidev-layout p {
+  margin-top: 0.35em;
+  margin-bottom: 0.35em;
+}
+.slidev-layout ul,
+.slidev-layout ol {
+  margin-top: 0.35em;
+  margin-bottom: 0.35em;
+}
+.slidev-layout li { margin-top: 0.15em; }
+
+/* Nested list items are supporting detail, not another top-level claim —
+   smaller and grey so the hierarchy is visible at a glance. */
+.slidev-layout li li,
+.slidev-layout.dense li li {
+  font-size: 0.86rem;
+  line-height: 1.45;
+  color: var(--aail-gray);
+}
+
+/* Subtitle under titles */
+.subtitle {
+  color: var(--aail-gray);
+  font-weight: 600;
+}
+
+/* Accent helpers */
+.accent  { color: var(--aail-accent); font-weight: 700; }
+.danger  { color: var(--aail-red);    font-weight: 700; }
+.success { color: var(--aail-green);  font-weight: 700; }
+.muted   { color: var(--aail-gray); }
+
+/* Boxed equation / highlight (red-boxed formula style) */
+.box {
+  border: 2px solid var(--aail-red);
+  border-radius: 6px;
+  padding: 0.5rem 0.9rem;
+  display: inline-block;
+}
+.box-soft {
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 0.8rem 1.1rem;
+  background: #f9fafb;
+}
+
+/* Tables — the bundled default is `p-2 py-3`, i.e. 24px of padding per row before
+   any text. On a 551px canvas a five-row table spends ~120px on padding alone,
+   which is most of a figure. Tighten the vertical rhythm only; columns keep their
+   horizontal breathing room. */
+.slidev-layout table {
+  font-size: 1.02rem;          /* same as p/li, so inline math matches across text and tables */
+}
+.slidev-layout th,
+.slidev-layout td {
+  padding-top: 0.28rem;
+  padding-bottom: 0.28rem;
+  line-height: 1.4;
+}
+.slidev-layout table {
+  margin-top: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+.slidev-layout.dense th,
+.slidev-layout.dense td {
+  padding-top: 0.18rem;
+  padding-bottom: 0.18rem;
+}
+/* Wide tables (many columns, math in every cell): one notch smaller text and
+   tighter side padding so a row stays on one line instead of wrapping or clipping.
+   Set per slide with `class: dense table-sm`. Inline math follows the cell size. */
+.slidev-layout.table-sm table {
+  font-size: 0.80em;
+}
+.slidev-layout.table-sm th,
+.slidev-layout.table-sm td {
+  padding-left: 0.45rem;
+  padding-right: 0.45rem;
+  padding-top: 0.14rem;
+  padding-bottom: 0.14rem;
+  line-height: 1.3;
+}
+
+/* Citation footnote line */
+.cite {
+  font-size: 0.72rem;
+  color: var(--aail-gray);
+  font-style: italic;
+}
+
+/* Two-column body: text left, figure right.
+   minmax(0,1fr) keeps columns exactly equal even when one holds wide content
+   (long code/unbreakable text); plain 1fr would let that column expand. */
+.cols2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 2rem;
+  align-items: start;
+}
+
+/* Slide-level: give the figure column more than half the width and centre both
+   columns vertically. Set via frontmatter `class: fig-right`. */
+.slidev-layout.fig-right .cols2 {
+  grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr);
+  gap: 1.4rem;
+  align-items: start;
+}
+
+/* A figure sized to the tallest a slide body can take: the 551px canvas minus the
+   navy band, the sub line and the bottom padding. Defined here rather than as a
+   utility class so the exact value stays in one place. */
+img.fig-max {
+  display: block;
+  max-height: 25rem;
+  max-width: 100%;
+  width: auto;
+  height: auto;
+  margin: 0 auto;
+}
+
+/* Three-column body — good for dense appendix slides */
+.cols3 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.4rem;
+  align-items: start;
+  font-size: 0.92em;
+}
+
+/* Keep column children from overflowing their cell (long code/text). */
+.cols2 > div,
+.cols3 > div { min-width: 0; }
+.cols2 pre,
+.cols3 pre { overflow-x: auto; max-width: 100%; }
+
+/* ============================================================
+   COVER (navy band) layout — used via layout: cover
+   ============================================================ */
+.slidev-layout.cover {
+  background: #ffffff;
+  padding: 0;
+  color: var(--aail-text);
+}
+.cover-band {
+  background: var(--aail-navy);
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  padding: 0 4rem 2.4rem 4rem;
+}
+.cover-band h1 {
+  color: #ffffff;
+  /* Starting size only: layouts/cover.vue steps it down at runtime until the
+     title fits two lines, so a short title keeps this size and a long one
+     shrinks instead of spilling onto a third line. */
+  font-size: 3.2rem;
+  line-height: 1.14;
+  text-wrap: balance;
+  font-weight: 800;
+  margin: 0;
+}
+.cover-meta {
+  padding: 1.6rem 4rem 0 4rem;
+}
+.cover-meta .subtitle {
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+.cover-footer {
+  position: absolute;
+  bottom: 2rem;
+  left: 4rem;
+  right: 4rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.cover-footer .date {
+  font-weight: 700;
+  color: var(--aail-text);
+}
+.cover-footer .logo {
+  font-weight: 800;
+  color: var(--aail-navy);
+  font-size: 1.4rem;
+  letter-spacing: 0.04em;
+}
+.cover-footer .logo-img {
+  height: 2.4rem;
+  width: auto;
+  object-fit: contain;
+}
+
+/* ============================================================
+   OUTLINE layout
+   ============================================================ */
+.outline-list {
+  list-style: none;
+  padding: 0;
+  margin-top: 1.5rem;
+}
+.outline-list li {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--aail-gray);
+  padding: 0.55rem 0;
+  border-bottom: 1px solid #eef0f3;
+  transition: all .2s;
+}
+.outline-list li.active {
+  color: var(--aail-navy);
+  font-weight: 800;
+}
+.outline-list li.active::before {
+  content: "\25B8  ";
+  color: var(--aail-accent);
+}
+
+/* Section divider (navy full-bleed) */
+.slidev-layout.section {
+  background: var(--aail-navy);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.slidev-layout.section h1 { color: #fff; font-size: 2.6rem; }
+.slidev-layout.section .subtitle { color: #9aa6bb; }
+
+/* Navy title label — drop into any slide for a PPT-style header band.
+   Negative margins pull it to the slide edges (cancels .slidev-layout padding). */
+.navy-title {
+  background: var(--aail-navy);
+  color: #fff;
+  padding: 0.5rem 1.5rem;
+  margin: -2.2rem -3rem 1rem;
+  font-size: 2.1rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+/* ============================================================
+   KaTeX sizing — Slidev canvas is 980px wide, so display math
+   has to be aggressively constrained. Base inline math at 1em
+   (matches body text), display math slightly smaller, narrow
+   columns shrink further.
+   ============================================================ */
+.katex { font-size: 1em; }   /* inline math follows the text it sits in */
+
+/* Display equations use ONE uniform baseline so the same equation looks the
+   same on every slide. The only automatic exception is the 3-column appendix
+   (columns ~280px), which gets its own consistent smaller baseline. Anything
+   that still overflows is marked per-equation with .eq-sm / .eq-xs. */
+.katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin: 0.4em 0;
+  padding-bottom: 2px;
+}
+/* Single global baseline for display math. */
+.katex-display > .katex { font-size: 1.05rem; }   /* rem, not em: the same size on dense and plain slides alike */
+
+/* Three columns: same baseline as everywhere else (the appendix sets its own below). */
+.cols3 .katex-display > .katex { font-size: 1.05rem; }
+
+/* Explicit per-equation overflow shrinkers (!important so they always win
+   over the column baselines):
+   <div class="eq-sm"> $$ ... $$ </div>  — one notch down
+   <div class="eq-xs"> $$ ... $$ </div>  — two notches down */
+.eq-sm .katex-display > .katex { font-size: 0.82rem !important; }
+.eq-xs .katex-display > .katex { font-size: 0.66rem !important; }
+
+/* ============================================================
+   .dense — slide-level helper, set via frontmatter `class: dense`.
+   Use on slides whose content (theorem + lemmas + display math,
+   stacked paragraphs + figure, etc.) overflows the 551px canvas
+   vertically. Shrinks body text, list spacing, and display-math
+   margins together so the proportions stay sane.
+   ============================================================ */
+.slidev-layout.dense p,
+.slidev-layout.dense li { font-size: 0.92rem; line-height: 1.4; }
+.slidev-layout.dense p { margin: 0.25em 0; }
+.slidev-layout.dense ul,
+.slidev-layout.dense ol { margin: 0.25em 0; padding-left: 1.2em; }
+.slidev-layout.dense li { margin-top: 0.1em; }
+.slidev-layout.dense h3 { font-size: 0.95rem; margin: 0.2em 0; }
+.slidev-layout.dense .katex-display { margin: 0.25em 0; }
+/* NOTE: .dense intentionally does NOT change KaTeX font-size — math is sized
+   uniformly by the rules above. Tighter spacing only. */
+.slidev-layout.dense .cite { font-size: 0.65rem; }
+.slidev-layout.dense .fig-ph { padding: 1.2rem 1rem; font-size: 0.78rem; }
+
+/* ============================================================
+   .appendix — slide-level helper, set via frontmatter `class: appendix`
+   (commonly combined with dense: `class: dense appendix`). For reference
+   slides where a whole proof block must fit on one slide, readability may
+   yield to compactness. Unlike .dense, this is the ONE place that shrinks
+   math below the global baseline — an intentional exception, because
+   proof-dump appendices cannot keep uniform equation size and still fit.
+   ============================================================ */
+.slidev-layout.appendix p,
+.slidev-layout.appendix li { font-size: 0.82rem; line-height: 1.35; }
+.slidev-layout.appendix h3 { font-size: 0.88rem; }
+.slidev-layout.appendix .katex { font-size: 0.9em; }
+.slidev-layout.appendix .katex-display > .katex { font-size: 0.86rem; }
+.slidev-layout.appendix .cols3 .katex-display > .katex { font-size: 0.75rem; }
+.slidev-layout.appendix .cite { font-size: 0.6rem; }
+
+/* Code blocks — tight enough to fit ~25-line algorithm dumps in the
+   right column of a two-cols-fig layout. */
+.slidev-layout pre {
+  font-size: 0.7rem !important;
+  line-height: 1.25 !important;
+  margin: 0.3em 0 !important;
+  padding: 0.5em 0.7em !important;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.slidev-layout pre code { line-height: 1.25 !important; }
+
+/* In a two-column layout the code column is only ~420px wide; shrink the
+   font further so wrapped/indented Python still fits horizontally and
+   25+ line snippets fit vertically. */
+.cols2 pre {
+  font-size: 0.58rem !important;
+  line-height: 1.2 !important;
+  padding: 0.4em 0.6em !important;
+}
+
+/* On a .dense slide, shrink one notch more. */
+.slidev-layout.dense pre {
+  font-size: 0.6rem !important;
+  line-height: 1.2 !important;
+}
+.slidev-layout.dense .cols2 pre {
+  font-size: 0.52rem !important;
+  line-height: 1.15 !important;
+}
+
+/* Footer slide number */
+.slidev-page-number {
+  color: var(--aail-gray);
+}
+
+/* Figure placeholder — used while figures are not yet generated.
+   Slim vertical padding so stacked placeholders don't push the slide
+   past its 551px height. */
+.fig-ph {
+  border: 1px dashed #9ca3af;
+  background: #f3f4f6;
+  color: #4b5563;
+  text-align: center;
+  padding: 2rem 1rem;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.85rem;
+  border-radius: 6px;
+}
+.fig-ph + .fig-ph { margin-top: 0.5rem; }
+
+/* TODO marker for body content not yet pasted. */
+.todo {
+  color: #b45309;
+  font-style: italic;
+  font-size: 0.85rem;
+}
+
+/* 가로로 긴 개념 도식(평면을 비스듬히 본 그림)은 열에 넣으면 글자가 뭉개진다.
+   본문 아래 전폭으로 깔되 높이를 제한해 한 슬라이드에 같이 들어가게 한다. */
+img.fig-wide {
+  display: block;
+  max-height: 14.5rem;
+  max-width: 100%;
+  width: auto;
+  height: auto;
+  margin: 0.35rem auto;
+}
+
+/* grey step subtitle shown after the slide title (frontmatter `tag:`) */
+/* subsection tag: small label in the top-right corner of the navy band, out of
+   the content flow so it never changes a slide's height */
+.h2-tag {
+  position: absolute;
+  top: 5px;
+  right: 14px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #9aa6bb;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* big centred question on a question slide; inner <p> from markdown inherits it */
+.q-big, .q-big p { font-size: 1.6rem; line-height: 1.45; font-weight: 600; text-align: center; margin: 0; }
+
+/* three equal boxes side by side (related-work slide) */
+.cols3-rw { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.8rem; align-items: stretch; }
+.cols3-rw > .box-soft { margin: 0; }

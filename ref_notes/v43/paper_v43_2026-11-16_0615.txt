@@ -1,0 +1,1108 @@
+\documentclass[11pt]{article}
+\usepackage[letterpaper,margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{booktabs,graphicx,array,float}
+\usepackage{pgfplots}\pgfplotsset{compat=1.17}
+\usepackage[colorlinks=false]{hyperref}
+\usepackage[ruled,vlined,linesnumbered]{algorithm2e}
+\SetKwComment{Cm}{\quad$\triangleright$\ }{}
+\newcommand\cmfont[1]{\footnotesize\itshape #1}\SetCommentSty{cmfont}
+\SetKwInOut{KwObs}{observes}
+\SetKwInOut{KwCon}{constraint}
+
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{assumption}[theorem]{Assumption}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\newcommand{\A}{\mathcal{A}}
+\newcommand{\I}{\mathcal{I}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\F}{\mathcal{F}}
+\newcommand{\est}[2]{\widehat{#1}^{\,(#2)}}
+\renewcommand{\Pr}{\operatorname{Pr}}
+
+\title{Sharing Coupled Constraints without Communication}
+\author{Junho (SNU AAIL)\thanks{Draft v43, November 16, 2026. Changes from v42 are listed at the end.}}
+\date{}
+
+\begin{document}
+\maketitle
+
+
+\section{Problem and method at a glance}\label{sec:glance}
+\subsection{Setting and question}
+Agents $i\in\I$ choose decisions $u_i$ with private convex costs $f_i$. They share a constraint
+\begin{equation}\label{eq:c}
+c(u)=\sum_{j\in\I_c} c_j(u_j)\le 0,
+\end{equation}
+each $c_j$ convex, to be met with probability at least $1-\delta$. When there are several such constraints they are indexed by $m$: $c^m(u)=\sum_{j\in\I_m}c^m_j(u_j)\le0$ with members $\I_m$, and $\mathcal M_i:=\{m:i\in\I_m\}$ are those agent $i$ shares. The letters $j,k$ always denote agents. No messages are exchanged. Each agent observes the terms $c_k(u_k)$ of the others after they act. We consider constraints that couple the agents physically: each term $c_k(u_k)$ is determined by quantities the others sense anyway, positions and velocities in Example~\ref{ex:ca}. Nothing internal (multipliers, beliefs, agreements) is sent; constraints on quantities that are not physically manifested are outside the scope. Some of the others follow a common convention; some follow no rule, and which is which is not known.
+
+Every agent solves, at every step, a problem of one fixed form:
+\begin{equation}\label{eq:local}
+E_i(R_i):=\min_{u_i}\ \beta_i f_i(u_i)+\sum_{m\in\mathcal M_i}\Psi(s^m_i),\qquad s^m_i=-\big(c^m_i(u_i)+R^m_i\big).
+\end{equation}
+$R^m_i$ is the amount of constraint $m$ that agent $i$ leaves to the others, $s^m_i$ its slack, and $\Psi$ a public convex nonincreasing price on the slack. The room is built in Section~\ref{sec:safety} as a sum over the other members of the constraint,
+\[
+R^m_i=\sum_{k\in\I_m\setminus\{i\}}\big(r^m_{ik}+U^m_{ik}\big),\qquad U^m_{ik}=\A^\delta_{w_{ik}}\big[(c^m_k-a^m_k)_+\big],
+\]
+with $r^m_{ik}$ the share agent $i$ leaves to member $k$ and $U^m_{ik}$ the coverage of what $k$ may use beyond its allowance $a^m_k$ (Definitions~\ref{def:agreement}, \ref{def:room}). The local problem is thus a sum over constraints $m$, and each room a sum over members $k$. A constraint with two members, $\I_m=\{i,k\}$, has $r^m_{ki}=-r^m_{ik}$ and $R^m_i=\A^\delta_{w_{ik}}\big[\max(c^m_k,r^m_{ik})\big]$. Below, $\sum_{m,k}$ stands for $\sum_{m\in\mathcal M_i}\sum_{k\in\I_m\setminus\{i\}}$. $\beta_i>0$ is a private multiplier on the agent's own cost, the fairness multiplier of Section~\ref{sec:beta}; $\beta_i=1$ unless stated. The optimal value $E_i(R_i)$ is the agent's \emph{energy}. Sections~\ref{sec:localp}--\ref{sec:laws} first treat one shared constraint and drop the index $m$: $s_i$, $R_i$, $\I_c$.
+
+\emph{Question.} What should $R_i$ be, and how should it be updated, so that (a) the constraint holds with probability $1-\delta$ although no agent knows the others' decisions, (b) agents that follow the convention reach the split that is optimal for all of them, and (c) no messages are needed?
+
+\subsection{The instance and the algorithm}
+The running instance is collision avoidance.
+
+\begin{example}[Collision avoidance]\label{ex:ca}
+For single integrators every pair of agents shares one constraint, $m=\{i,k\}$: $c^m=g^m_i(u_i)+g^m_k(u_k)\le0$ with the term of $i$ $g^m_i(u_i)=-2d_{ik}^\top u_i-\frac\kappa2h_{ik}$, $d_{ik}=p_i-p_k$, $h_{ik}=\|d_{ik}\|^2-\rho^2$: the barrier condition $\dot h_{ik}\ge-\kappa h_{ik}$, separable in the inputs at a given state.
+\end{example}
+
+\paragraph{Algorithm.} Each step agent $i$ runs three blocks per sensed neighbour $k$, using only its own observation and public constants (Algorithm~\ref{alg:agent}). Block~1 is the subject of Section~\ref{sec:localp}, block~2 of Section~\ref{sec:safety}, block~3 of Section~\ref{sec:dual}, and what follows from them of Sections~\ref{sec:laws} and \ref{sec:thermo}; every numerical choice is fixed in Section~\ref{sec:impl}. Figure~\ref{fig:dataflow} shows which variable feeds which.
+
+\begin{algorithm}[H]
+\small
+\DontPrintSemicolon
+\caption{Agent $i$, one step}\label{alg:agent}
+\KwObs{own $p_i,u_i^0,\omega_i$; per neighbour $k$ (anonymous, within $5$): $p_k(t)$, $u_k(t-1)$}
+\KwCon{per neighbour $k$ the constraint $m=\{i,k\}$: $c^m=g^m_i(u_i)+g^m_k(u_k)\le0$, the barrier condition $\dot h_{ik}\ge-\kappa h_{ik}$, with $g^m_i(u)=-2d_{ik}^\top u-\frac\kappa2h_{ik}$, $d_{ik}=p_i-p_k$, $h_{ik}=\|d_{ik}\|^2-\rho^2$. $k$'s term is $c^m_k:=g^m_k(u_k)=\alpha y_k-\frac\kappa2h_{ik}$ with $\alpha=2\|d_{ik}\|$ and the approach speed $y_k=\langle d_{ik}/\|d_{ik}\|,\,u_k\rangle$; $c^m_i$ likewise.}
+\BlankLine
+\textbf{1) Local problem.}\ \ $\beta_i=\mathrm{clip}\big(e^{(W_i-\bar ft)/W_0},\tfrac18,8\big)$;\ \ $u_i(t)\leftarrow\arg\min_u\ \beta_if_i(u)+\sum_{m\in\mathcal M_i}\Psi(s^m_i)$,\ \ $s^m_i=-\big(g^m_i(u)+R^m_i(t)\big)$;\ \ $W_i\leftarrow W_i+f_i(u_i(t))\Delta t$\;
+\BlankLine
+\textbf{2) Belief (EVaR room).}\ \ observe $y_k$ from $u_k(t-1)$ $\to$ posterior over $\tau$ and predicted usage $N(\mu_j,\sigma_j^2)$ of $k$ $\to$\;
+\Indp $R^m_i(t)=\A^\delta_{w_{ik}}\big[\max(c^m_k,r^m_{ik}(t))\big]$;\ \ replica $\hat R^m_k(t)=\A^\delta_{\hat w_{ki}}\big[\max(c^m_i,-r^m_{ik}(t))\big]$;\ \ $\eta_{ik}(t)=w_{ik}(\F)\,\hat w_{ki}(\F)$\;\Indm
+\BlankLine
+\textbf{3) Exchange.}\ \ $r^m_{ik}(t)\leftarrow r^m_{ik}(t{-}1)-\eta_{ik}(t{-}1)\,(\lambda^m_i-\hat\lambda^m_k)/(2k_e)$,\ \ $\lambda^m_i=k_e(\epsilon-s^m_i)_+$, $\hat\lambda^m_k=k_e(\epsilon-\hat s^m_k)_+$, slacks of step $t{-}1$: $s^m_i=-(c^m_i+R^m_i(t{-}1))$, $\hat s^m_k=-(c^m_k+\hat R^m_k(t{-}1))$ with $u(t{-}1)$ and $d_{ik}(t{-}1)$\;
+\BlankLine
+\footnotesize Executed per step in the order 3, 2, 1. Contact opens: $r^m_{ik}=0$; contact closes: discard. Without the fairness multiplier $\beta_i=1$.
+\end{algorithm}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{alg_dataflow_abstract.pdf}
+\caption{Variables of one step of an agent and their dependencies, in general form. Algorithm~\ref{alg:agent} is its instance for collision avoidance (Figure~\ref{fig:dataflowimpl}).}\label{fig:dataflow}
+\end{figure}
+
+\subsection{What is shown}
+\begin{enumerate}
+\item \emph{A probabilistic model that is robust to unknown neighbours} (Section~\ref{sec:safety}). The room $R_i$ is a certified bound on the others' usage under the agent's own belief; a nonnegative slack of one agent certifies the whole constraint at level $\delta$ (Theorem~\ref{thm:sound}), and a neighbour that follows no rule enters as a load that the room always covers (Proposition~\ref{prop:load}).
+\item \emph{A dual system without messages, with fairness} (Sections~\ref{sec:dual} and \ref{sec:laws}). The multiplier of each share is read from the observed slack and exchanged across each contact; the copies of an agreement stay opposite, the total energy decreases, and equal prices are the optimum of the group (Theorems~\ref{thm:exchange}, \ref{thm:eq}, \ref{thm:load}). A second multiplier, on the agent's own cost, is the costate of the cost paid so far: with it the differences of paid cost stay bounded and their relative size vanishes as $1/t$, where without it they grow in proportion to time (Propositions~\ref{prop:greedy}--\ref{prop:fairconv}).
+\item \emph{A thermodynamic reading} (Section~\ref{sec:thermo}). Agreements, costates, risk budgets and beliefs are wall positions, contact forces, entropies and heat, with a first and a second law (Proposition~\ref{prop:first}).
+\end{enumerate}
+
+\subsection{Dictionary}\label{sec:dict}
+The quantities of the construction correspond to those of a packing of soft bodies. The table is a map of the paper: each entry is derived at the place named in its last column and discussed in Section~\ref{sec:thermo}.
+
+\begin{center}
+\small
+\begin{tabular}{>{\raggedright}p{0.25\linewidth}>{\raggedright}p{0.47\linewidth}l}
+\toprule
+mechanics / thermodynamics & this construction & where\tabularnewline
+\midrule
+a ball (a system) & agent $i$, internal energy $E_i(R_i)$, $R_i=(R^m_i)_{m\in\mathcal M_i}$ & \eqref{eq:local}\tabularnewline
+contact & constraint $m$ shared with $k$, open while $k$ is sensed & Def.~\ref{def:agreement}\tabularnewline
+position of the wall & agreement $r^m_{ik}$ & Def.~\ref{def:agreement}\tabularnewline
+conservation across a wall & $r^m_{ik}+r^m_{ki}\ge0$ & Prop.~\ref{prop:agree}\tabularnewline
+contact force (magnitude) & costate $\lambda^m_i=-\Psi'(s^m_i)$, public & Prop.~\ref{prop:read}\tabularnewline
+contact force (vector) & $\phi^m_i=-\lambda^m_i\nabla_{u_i}c^m_i$ & Sec.~\ref{sec:force}\tabularnewline
+force balance of a ball & optimality of \eqref{eq:local}: $\beta_i\omega_i(u_i-u_i^0)=\sum_m\phi^m_i$ & Sec.~\ref{sec:force}\tabularnewline
+action and reaction & equal prices $\lambda^m_i\rho^m_{ik}=\lambda^m_k\rho^m_{ki}$ & Thm.~\ref{thm:eq}\tabularnewline
+transmission of a contact & $\rho^m_{ik}\in[0,1]$ & Prop.~\ref{prop:prices}\tabularnewline
+pressure of a ball & virial $P_i=\tfrac12\sum_m\langle\phi^m_i,d_{ik}\rangle$ & Sec.~\ref{sec:force}\tabularnewline
+force chain & transfer $\partial\lambda^m_i/\partial R^{m'}_i$ & Prop.~\ref{prop:transfer}\tabularnewline
+entropy of a ball & $S_i:=\ln(1/\delta_i)=-\ln\sum_me^{-S^m_i}$ & Sec.~\ref{sec:temp}\tabularnewline
+entropy of a contact & $S^m_i:=\ln(1/\delta^m_i)$, relative entropy & Lemma~\ref{lem:props}(iv)\tabularnewline
+Boltzmann weight of a contact & $\nu^m_i=\delta^m_i/\delta_i=\partial S_i/\partial S^m_i$ & Sec.~\ref{sec:temp}\tabularnewline
+temperature of a ball & $T_i:=\partial E_i/\partial S_i$ & Prop.~\ref{prop:temp}\tabularnewline
+decision temperature of a contact & $\theta^{m\star}_i$; in energy units $\lambda^m_i\theta^{m\star}_i=T_i\nu^m_i$ & Def.~\ref{def:A}, Prop.~\ref{prop:temp}\tabularnewline
+heat & change of energy through the belief & Sec.~\ref{sec:heat}\tabularnewline
+external wall, heat source & neighbour outside the convention & Sec.~\ref{sec:external}\tabularnewline
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Notation}
+\begin{center}
+\small
+\begin{tabular}{lll}
+\toprule
+symbol & meaning & where\\
+\midrule
+$u_i$, $f_i$, $\omega_i$ & decision, private cost, private cost weight & \eqref{eq:local}, Sec.~\ref{sec:impl}\\
+$c_k(u_k)$, $\delta$ & term of $k$ in the shared constraint, risk level & \eqref{eq:c}\\
+$j,k$;\ \ $m$, $\mathcal M_i$, $\I_m$ & agents;\ \ constraint, those of $i$, its members & Sec.~\ref{sec:glance}\\
+$c^m_i(u_i)$;\ \ $g^m_i(u_i)$ & term of $i$ in constraint $m$;\ \ in the instance & \eqref{eq:local}, Ex.~\ref{ex:ca}\\
+$R^m_i$, $s^m_i$ & room left to the others, slack & \eqref{eq:local}, Def.~\ref{def:room}\\
+$\Psi$; $\epsilon,k_e,M$ & public price on the slack; layer depth, stiffness, barrier slope & \eqref{eq:local}, Sec.~\ref{sec:impl}\\
+$E_i$ & energy, optimal value of the local problem & \eqref{eq:local}\\
+$w_{ik}$, $\F$, $w_{ik}(\F)$ & belief of $i$ about $k$, following set, following mass & Def.~\ref{def:belief}\\
+$\A^\delta_w[\cdot]$, $\theta^\star$ & certified bound, decision temperature & Def.~\ref{def:A}\\
+$r^m_{ik}$, $a^m_i$ & agreement (share of $m$ left to $k$), allowance & Def.~\ref{def:agreement}\\
+$U^m_{ik}$, $L^m_{ik}$ & coverage of $k$'s excess, load of $k$ & Def.~\ref{def:room}, Sec.~\ref{sec:external}\\
+$\lambda^m_i$, $\rho^m_{ik}$ & costate, transmission & Prop.~\ref{prop:prices}\\
+$\eta_{ik}$ & mutual trust $w_{ik}(\F)w_{ki}(\F)$ & Def.~\ref{def:exchange}\\
+$\sum_{m,k}$ & $\sum_{m\in\mathcal M_i}\sum_{k\in\I_m\setminus\{i\}}$; $m$ dropped for one constraint & Sec.~\ref{sec:glance}\\
+$\beta_i$, $W_i$, $W_0$, $\bar f$ & fairness multiplier, paid cost, its scale, public mean cost rate & Def.~\ref{def:beta}\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+
+\section{The local problem}\label{sec:localp}
+Block~1 of Figure~\ref{fig:dataflow}. Every agent solves \eqref{eq:local}; this section defines what enters it besides the room: the energy and the costate, the price $\Psi$ on the slack, and the multiplier $\beta_i$ on the cost. The room $R_i$ is taken as given here and is built in Section~\ref{sec:safety}.
+
+\subsection{Energy and costate}
+\begin{definition}[Costate]
+The costate of agent $i$ is
+\[
+\lambda_i:=E_i'(R_i)=-\Psi'(s_i)\big|_{\text{optimum of \eqref{eq:local}}}\ \ge0,
+\]
+the increase of the agent's energy per unit of room it leaves to the others.
+\end{definition}
+
+\paragraph{Example.} Two robots with speeds $v_0+v_1\le1.5$, $c_i=v_i-0.75$, cost $\frac12(v_i-\bar v_i)^2$, agreement $r_{01}$ and a hard wall: robot $0$ is capped at $0.75-r_{01}$, $E_0=\frac12(\bar v_0-0.75+r_{01})_+^2$, $\lambda_0=(\bar v_0-0.75+r_{01})_+$: how far its wish lies beyond its share.
+
+\subsection{The price on the slack: wall and layer}
+The costate of a neighbour can be read from its slack only if the price is strictly convex there.
+
+\begin{proposition}[Readability]\label{prop:read}
+(i) If $\Psi$ is a hard wall ($0$ on $s\ge0$, $+\infty$ below), an active share reveals only $\lambda_ks_k=0$, not $\lambda_k$. (ii) If $\Psi$ is strictly convex on $(0,\epsilon)$, then $\lambda_k=-\Psi'(s_k)$ is determined by $k$'s slack.
+\end{proposition}
+\begin{proof}
+Optimality conditions of \eqref{eq:local}.
+\end{proof}
+
+We take $\Psi(s)=\frac{k_e}{2}(\epsilon-s)^2$ on $[0,\epsilon]$, $0$ above, and slope $\Psi'\le-M$ below zero. With this barrier, \eqref{eq:local} is solvable for every $R_i$, and it has the solution of the walled problem wherever that problem is feasible and $M$ exceeds its multipliers.
+
+\subsection{The multiplier on the cost}\label{sec:beta}
+The equilibrium of Theorem~\ref{thm:eq} splits each constraint at least total cost at every instant. It has no memory: an agent that has yielded often yields as much the next time. Let
+\[
+W_i(t):=\int_0^tf_i(u_i)\,d\tau
+\]
+be the cost agent $i$ has paid so far, a private quantity. Fairness over time is one more constraint, shared by all agents through a common bound $\bar W$:
+\begin{equation}\label{eq:minmax}
+\min_{\bar W,\,u}\ \bar W\quad\text{s.t.}\quad W_i\le\bar W\ \ (i\in\I),\qquad c(u)\le0 .
+\end{equation}
+With multipliers $\beta_i\ge0$ and $\lambda\ge0$ its Lagrangian is
+\[
+\bar W+\sum_i\beta_i(W_i-\bar W)+\lambda c=\sum_i\beta_iW_i+\Big(1-\sum_i\beta_i\Big)\bar W+\lambda\sum_jc_j .
+\]
+Stationarity in $\bar W$ gives $\sum_i\beta_i=1$; stationarity in $u_i$ is that of the local problem \eqref{eq:local} with $f_i$ replaced by $\beta_if_i$; complementary slackness gives $\beta_i(W_i-\bar W)=0$, so the agents that carry a multiplier have paid the same. The multiplier of the cost is thus the multiplier of the agent's share of the fairness constraint. Replacing $\max_iW_i$ by the smooth $\Phi(W):=W_0\ln\sum_ie^{W_i/W_0}$, $W_0>0$, gives the weights of a Gibbs distribution,
+\begin{equation}\label{eq:gibbs}
+\beta_i=\frac{\partial\Phi}{\partial W_i}=\frac{e^{W_i/W_0}}{\sum_ke^{W_k/W_0}},\qquad\frac{\beta_i}{\beta_k}=e^{(W_i-W_k)/W_0},
+\end{equation}
+and \eqref{eq:minmax} is recovered as $W_0\to0$. As $\lambda_i=\partial E_i/\partial R_i$ is the costate of the room, $\beta_i=\partial\Phi/\partial W_i$ is the costate of the paid cost.
+
+\begin{definition}[Fairness multiplier]\label{def:beta}
+Each agent keeps $W_i$ and solves \eqref{eq:local} with the cost $\beta_if_i$,
+\[
+\beta_i:=e^{(W_i-\bar ft)/W_0},
+\]
+where $W_0>0$ and $\bar f\ge0$ are public constants. Rooms, agreements, beliefs and the exchange law are unchanged, and no agent reads the multiplier of another.
+\end{definition}
+
+The normalisation of \eqref{eq:gibbs} is not needed. A factor common to all agents multiplies every cost alike, and against a hard wall it changes no decision; only the ratios in \eqref{eq:gibbs} act, and they depend on differences of paid cost. With a finite layer the common factor matters through the ratio of cost to price, and $\bar f$, the mean cost rate, keeps the multipliers near one. Soundness (Theorem~\ref{thm:sound}) and the conservation of agreements (Theorem~\ref{thm:exchange}(i)) do not involve the cost; Theorems~\ref{thm:exchange}(ii)--(iv) and \ref{thm:eq} hold, for fixed multipliers, with the energy $E_i$ of the cost $\beta_if_i$, since costs were private already; the multipliers move on the slower scale of the paid cost. The multiplier enters the exchange only through the slack: an agent with a larger $\beta_i$ yields less at the same room, its slack falls, its costate rises, and the exchange law moves room to it.
+
+\section{Belief and room}\label{sec:safety}
+Block~2 of Figure~\ref{fig:dataflow}; it answers requirement (a). The room $R_i$ is a certified bound on what the others use, built from a belief and an agreement (Theorem~\ref{thm:sound}); it stays sound toward a neighbour that follows no rule (Proposition~\ref{prop:load}).
+
+
+Throughout, the constraint is shared by the agents $\I_c$; a constraint shared by two agents is the special case $\I_c=\{i,k\}$, used in the examples.
+
+\subsection{What the room must bound}
+Rearranging \eqref{eq:c} for agent $i$, the constraint holds if and only if $c_i(u_i)\le-\sum_{k\ne i}c_k(u_k)$. Agent $i$ controls the left side and does not know the right side. Requirement (a) is therefore met by $s_i\ge0$ exactly when $R_i$ bounds the others' terms:
+
+\begin{lemma}\label{lem:room}
+If $\Pr\big(\sum_{k\ne i}c_k>R_i\big)\le\delta$, then $s_i\ge0$ implies $\Pr\big(c(u)>0\big)\le\delta$.
+\end{lemma}
+Only the others' terms are random; the probability is taken under agent $i$'s belief about them.
+
+\subsection{Belief and the certified bound}
+\begin{definition}[Belief]\label{def:belief}
+Agent $i$'s belief about another member $k$ of $\I_c$ is a distribution $w_{ik}$ over hypotheses $h$ about $k$. Each hypothesis gives a law $\pi^h$ of the pair $(c_k,a_k)$: the term $k$ will use and the allowance $k$ holds (Definition~\ref{def:agreement}). Expectations are taken as $\E_{w_{ik}}[\cdot]=\sum_h w_{ik}(h)\,\E_{\pi^h}[\cdot]$. The hypotheses are split into those under which $k$ follows the convention, the set $\F$, and the rest; $w_{ik}(\F)$ is the \emph{following mass} of $k$ in $i$'s belief.
+\end{definition}
+
+The allowance enters the belief because it is built from agreements between $k$ and other members, which $i$ need not hold. For a constraint shared by two agents, $a_k=r_{ik}$ is $i$'s own number and every hypothesis puts it at that value.
+
+\begin{definition}[Correct belief]
+Agent $i$'s beliefs are correct if, for every other member $k$, the predictive law $\E_{w_{ik}}$ of $(c_k,a_k)$ is the law of what $k$ actually uses and holds.
+\end{definition}
+
+\begin{definition}[Certified bound]\label{def:A}
+For a quantity $X$ whose moment generating function under $w$ is finite near the origin, a belief $w$ and a risk level $\delta\in(0,1)$, with $S:=\ln(1/\delta)$,
+\[
+\A^\delta_w[X]:=\inf_{\theta>0}\Big[\theta\ln\E_w e^{X/\theta}+\theta S\Big],
+\]
+and $\theta^\star$ the minimiser when it exists, the \emph{decision temperature}. Every quantity used below is bounded (by the capability range), so the condition holds.
+\end{definition}
+
+\begin{lemma}[Properties]\label{lem:props}
+Let $X,Y$ be quantities on a common space of hypotheses and outcomes, with law $w$.
+\begin{enumerate}
+\item[(i)] Tail bound: $\Pr_w\big(X>\A^\delta_w[X]\big)\le\delta$.
+\item[(ii)] Constants: $\A^\delta_w[X+a]=\A^\delta_w[X]+a$ for every known $a$; in particular $\A^\delta_w[a]=a$.
+\item[(iii)] Order: if $X\le Y$ pointwise, $\A^\delta_w[X]\le\A^\delta_w[Y]$; and $\A^\delta_w[X]$ is nonincreasing in $\delta$.
+\item[(iv)] Duality: $\A^\delta_w[X]=\sup\{\E_Q[X]:\mathrm{KL}(Q\|w)\le S\}$.
+\item[(v)] Subadditivity: $\A^\delta_w[X+Y]\le\A^\delta_{w_X}[X]+\A^\delta_{w_Y}[Y]$, where $w_X,w_Y$ are the marginal laws of $X$ and $Y$; no assumption on their dependence is needed.
+\item[(vi)] Convexity: $\A^\delta_w[tX+(1-t)Y]\le t\A^\delta_w[X]+(1-t)\A^\delta_w[Y]$ for $t\in[0,1]$.
+\end{enumerate}
+\end{lemma}
+\begin{proof}
+(i) For every $\theta>0$ and $t$, Markov's inequality applied to $e^{X/\theta}$ gives $\Pr_w(X>t)\le\E_w e^{X/\theta}e^{-t/\theta}$. The right side equals $\delta$ at $t(\theta)=\theta\ln\E_we^{X/\theta}+\theta S$, so every $t(\theta)$ is a valid bound, and so is their infimum, by continuity of $t\mapsto\Pr_w(X>t)$ from the right.
+(ii) $\theta\ln\E_we^{(X+a)/\theta}=\theta\ln\E_we^{X/\theta}+a$ for every $\theta$. For $X=0$ the objective is $\theta S$, whose infimum is $0$.
+(iii) If $X\le Y$, then $\E_we^{X/\theta}\le\E_we^{Y/\theta}$ for every $\theta$, and the infimum of the smaller function is smaller. The objective is nondecreasing in $S$ for every $\theta$, and $S$ decreases as $\delta$ grows.
+(iv) The problem on the right maximises a linear function of $Q$ over a convex set that contains $w$ in its interior ($\mathrm{KL}(w\|w)=0<S$), so strong duality holds: it equals $\inf_{\theta>0}\sup_Q\{\E_Q[X]-\theta(\mathrm{KL}(Q\|w)-S)\}$. By the Donsker--Varadhan formula, $\sup_Q\{\E_Q[X]-\theta\mathrm{KL}(Q\|w)\}=\theta\ln\E_we^{X/\theta}$, which gives the definition.
+(v) By (iv), $\A^\delta_w[X+Y]=\sup_Q\{\E_Q[X]+\E_Q[Y]\}$ over $\mathrm{KL}(Q\|w)\le S$. For each such $Q$, the marginal $Q_X$ satisfies $\mathrm{KL}(Q_X\|w_X)\le\mathrm{KL}(Q\|w)\le S$ (data processing), so $\E_Q[X]=\E_{Q_X}[X]\le\A^\delta_{w_X}[X]$; likewise for $Y$.
+(vi) By (iv), $\A^\delta_w$ is a supremum of the linear functionals $X\mapsto\E_Q[X]$, hence convex.
+\end{proof}
+
+Property (v) is what lets agent $i$ bound each neighbour from its own marginal belief about that neighbour and still certify the sum, whatever the neighbours' joint behaviour; property (vi), with (iii), makes the room convex in the agreement variables (Section~\ref{sec:exchange}). By (iv), $\ln(1/\delta)$ is a budget of relative entropy: the bound is the worst mean over predictions within that many nats of the belief.
+
+\subsection{Why belief alone falls short}
+A room built from beliefs alone, $R_i=\sum_{k\ne i}\A^\delta_{w_{ik}}[c_k]$, is sound by Lemma~\ref{lem:room} and Lemma~\ref{lem:props}(i),(v). But a cooperating neighbour's term depends on its own room, which depends on its prediction of the others: the predictions refer to each other and have no common reference. Each agent must then either cover the others' capability, leaving part of the budget unused by anyone, or trust optimistic predictions, and optimistic agents claim the same budget more than once. In the corridor, $v_0+v_1\le1.5$ with $c_i=v_i-0.75$, two agents that each allow themselves $0.85$ claim $1.7$. Nor can a fixed split move toward the agent that needs the budget more. What is missing is a quantity the agents share.
+
+\subsection{Agreements and allowances}
+\begin{definition}[Agreement variable, allowance]\label{def:agreement}
+For every other member $k$ of $\I_c$, agent $i$ holds a number $r_{ik}$, the share it leaves to $k$. Its allowance is
+\[
+a_i:=-\sum_{k\in\I_c\setminus\{i\}}r_{ik},
+\]
+and it uses its own term within $c_i\le a_i$. Every $r_{ik}$ starts at $0$ and is updated by the rule of the convention, which uses observable quantities only (Section~\ref{sec:exchange}). The events that start and reset an agreement are part of the convention and are observed by every member; for collision avoidance they are a neighbour entering and leaving the sensing range, and an agreement is reset to $0$ when its pair separates.
+\end{definition}
+
+Nothing in this definition requires $k$ to follow the convention; $r_{ik}$ is agent $i$'s own number, kept with every member. Whether $k$ follows the convention is a hypothesis in $i$'s belief.
+
+\begin{proposition}[Agreements bound the cooperating members]\label{prop:agree}
+If $k$ follows the convention, it holds $r_{ki}$, started at $0$ and updated by the same rule from the same observations, so that
+\begin{equation}\label{eq:pair}
+r_{ik}+r_{ki}\ge0,
+\end{equation}
+with equality when the observations are exact, and it keeps $c_k\le a_k$. If every member follows the convention, $\sum_{k\in\I_c}a_k\le0$, hence $\sum_{k\ne i}c_k\le-a_i$.
+\end{proposition}
+\begin{proof}
+Both copies start at $0$ and move by opposite amounts computed from the same quantities; an error toward a larger costate of the other only increases the sum. A member following the convention keeps $c_k\le a_k$ by Definition~\ref{def:agreement}. Summing \eqref{eq:pair} over pairs gives $\sum_ka_k=-\sum_{\{i,k\}}(r_{ik}+r_{ki})\le0$.
+\end{proof}
+
+Agent $i$ thus bounds the cooperating members' total by its own allowance, without knowing the agreements among the others. In the corridor, $r_{01}=0.1$ and $r_{10}=-0.1$ give $a_0=-0.1$ and $a_1=0.1$, so $v_0\le0.65$ and $v_1\le0.85$, which exhaust the budget exactly.
+
+\subsection{The room}
+\begin{definition}[Room]\label{def:room}
+\[
+R_i:=-a_i+\sum_{k\in\I_c\setminus\{i\}}U_{ik},\qquad U_{ik}:=\A^\delta_{w_{ik}}\big[(c_k-a_k)_+\big].
+\]
+\end{definition}
+
+The room is the cooperating members' total, $-a_i$, plus a coverage $U_{ik}$ of what each member may use beyond its allowance. Under the hypothesis that $k$ follows the convention the excess is zero (Proposition~\ref{prop:agree}); a member believed with certainty to follow it has $U_{ik}=0$, and the budget is split without double cover. A member that ignores its allowance is predicted by the other hypotheses to exceed it, and $U_{ik}$ covers the excess. For two agents, $-a_i=a_k=r_{ik}$ and
+\[
+R_i=r_{ik}+\A^\delta_{w_{ik}}\big[(c_k-r_{ik})_+\big]=\A^\delta_{w_{ik}}\big[\max(c_k,r_{ik})\big]
+\]
+by Lemma~\ref{lem:props}(ii). If $i$ knows that $k$ holds no agreement at all, it may set $r_{ik}=-\infty$ in this form, and the term becomes $\A^\delta_{w_{ik}}[c_k]$. At one end, with every member believed with certainty to follow the convention, $R_i=-a_i$; at the other, with no agreement and beliefs covering the capability range, $R_i\to\sum_kc_k^{\max}$, worst-case robust control.
+
+\begin{theorem}[Soundness]\label{thm:sound}
+$s_i\ge0$ implies $\Pr_{w_i}\big(c(u)>0\big)\le\delta$, the probability being taken under agent $i$'s beliefs. If agent $i$'s beliefs are correct, the probability is the true one.
+\end{theorem}
+\begin{proof}
+Pointwise, $\sum_{k\ne i}c_k\le\sum_{k\ne i}a_k+\sum_{k\ne i}(c_k-a_k)_+$. The allowances are produced by the common rule, which moves the two copies of every agreement by opposite amounts, so under every hypothesis they sum to zero over $\I_c$ and $\sum_{k\ne i}a_k=-a_i$; whether $k$ keeps its allowance changes only its excess. By Lemma~\ref{lem:props}(ii),(iii),(v), $\A^\delta[\sum_{k\ne i}c_k]\le-a_i+\sum_{k\ne i}U_{ik}=R_i$ for any joint law with the marginals $w_{ik}$; by Lemma~\ref{lem:props}(i), $\Pr(\sum_{k\ne i}c_k>R_i)\le\delta$; apply Lemma~\ref{lem:room}.
+\end{proof}
+
+A single agent's slack certifies the whole constraint, and only that agent's beliefs need be correct: a member following the convention keeps $c_k\le-R_k\le a_k$ whatever its own beliefs, since its coverages are nonnegative. When several members have nonnegative slack, each issues a certificate under its own beliefs, and one correct belief suffices.
+
+The certification does not rest on the members following the convention; its tightness does, and so does knowledge of the allowances.
+
+\begin{assumption}[Observability of allowances]\label{ass:allow}
+Agent $i$ knows the allowance $a_k$ of every other member $k$ of $\I_c$, computed by the common rule as if $k$ followed the convention (so $r_{ki}=-r_{ik}$ in the computation, whatever $k$ actually does). This holds automatically when $\I_c=\{i,k\}$, since then $a_k=-r_{ki}=r_{ik}$, and whenever the members of $\I_c$ observe each other, since every agreement variable can then be recomputed from the common rule.
+\end{assumption}
+
+Under Assumption~\ref{ass:allow} the belief about $a_k$ is a point mass, the excess of a member believed to follow the convention is exactly zero, and its coverage vanishes. Without it, the uncertainty about $a_k$ stays in the coverage: the room remains sound but is less tight.
+
+\subsection{The hypothesis family}\label{sec:beliefs}
+\begin{definition}[Self-model]
+A hypothesis is a behavioural temperature $\tau\in[0,\infty]$ and an intent $\bar u_k$ held fixed over a window $[t-T,t]$: the neighbour acts as $p(a\mid\tau,\bar u_k)\propto\exp(-D_k(a;\bar u_k)/\tau)$, with $D_k$ the regret of $a$ under the public self-model: problem \eqref{eq:local} with the public weight in place of the private cost, placed in $k$'s situation. The belief is updated by Bayes' rule on the window. The finite temperatures form the following set $\F$; $\tau=\infty$ does not follow.
+\end{definition}
+
+At $\tau\to0$ the neighbour acts as $i$ would and keeps the agreement; since $D_k$ contains the barrier, a finite temperature exceeds it with excess density $\propto e^{-Me/\tau}$; $\tau=\infty$ is uniform over a public capability range. A neighbour that never yields acts as $i$ would until $i$'s policy would yield, so compliance cannot be tested earlier; one whose heading changes erratically within the window gets a high temperature before any constraint binds.
+
+\subsection{Neighbours outside the convention: a load}\label{sec:external}
+No agent can tell in advance whether a neighbour follows the convention; it holds an agreement variable and a belief about every neighbour, and applies the same rules to all. A neighbour that does not follow the convention is therefore not a category in the rules but a limit of the belief: its following mass $w_{ik}(\F)$ goes to zero. This subsection describes what that limit does to the room; Section~\ref{sec:loadeq} treats the equilibrium and the cost of the group. We call such a neighbour an \emph{external agent}.
+
+As the following mass $w_{ik}(\F)$ goes to zero, Theorem~\ref{thm:exchange}(iv) freezes the agreement with $k$, and the term of $k$ in the room of $i$ tends to a quantity that depends on the belief only,
+\[
+L_{ik}:=\A^\delta_{w_{ik}}\big[\max(c_k,r_{ik})\big]\to\A^\delta_{w_{ik}}[c_k],
+\]
+the \emph{load} of $k$ on $i$.
+
+\begin{proposition}[Load]\label{prop:load}
+For a neighbour whose following mass has vanished: (i) the room of $i$ contains $L_{ik}$, and safety against $k$ holds at level $\delta$ by Lemma~\ref{lem:props}(i), with no assumption on $k$ beyond its capability range; (ii) $L_{ik}$ depends on the belief only, not on any exchange; (iii) the room never fell below $\A[c_k]$ at any stage of the belief, so whatever was exchanged with $k$ while it was still believed to follow did not affect safety, only the share left to it.
+\end{proposition}
+
+The passage from exchange partner to load is continuous in the belief, through $\rho_{ik}$ and the estimated price, and is driven by observation. A neighbour that never yields cannot be told from a cooperating one before the agent's own policy would yield, so the agreement with it is exchanged like any other until then; one that changes heading erratically is assigned a high temperature before any constraint binds, and its agreement freezes early.
+
+\section{Exchange}\label{sec:dual}
+Block~3 of Figure~\ref{fig:dataflow}; it answers requirement (c). The price of an agreement is the costate times a transmission; each agent reads the neighbour's price from the neighbour's observed action; both copies of the agreement move by one number, so they stay opposite (Theorem~\ref{thm:exchange}).
+
+\subsection{The price of an agreement}
+\begin{proposition}[Prices of the design variables]\label{prop:prices}
+By the envelope theorem in $u_i$ and in $\theta$, for every input $\xi$ of $R_i$, $\partial E_i/\partial\xi=\lambda_i\,\partial R_i/\partial\xi$, and
+\[
+\frac{\partial R_i}{\partial r_{ik}}=1-\tilde w_{ik}\big(c_k>a_k\big)=:\rho_{ik}\in[0,1],\qquad
+\frac{\partial R_i}{\partial\delta}=-\sum_k\frac{\theta^\star_{ik}}{\delta},
+\]
+where $\tilde w_{ik}$ is the belief tilted by $e^{(c_k-a_k)_+/\theta^\star_{ik}}$; the variable $r_{ik}$ enters $a_i$ and, through $r_{ki}=-r_{ik}$, $a_k$.
+\end{proposition}
+
+The agreement costs agent $i$ the price $\lambda_i\rho_{ik}$, the full costate when the neighbour surely keeps it. The risk level is a design parameter, not a variable the agents exchange; its derivative $\lambda_i\sum_k\theta^\star_{ik}/\delta$ is the saving per unit of accepted probability, $\lambda_i\theta^\star_{ik}$ per nat of the budget $\ln(1/\delta)$ on each neighbour. The belief also changes $E_i$, but no constraint acts on it: it is set by observation, and its derivative is a sensitivity, not a price.
+
+\subsection{Reading costates}
+The exchange of Section~\ref{sec:exchange} needs the neighbour's costate without messages. The costate is a function of the slack, the slack of the room, and the room of the neighbour's beliefs; each step can be made public.
+
+\begin{assumption}[Public beliefs]\label{ass:public}
+The family of hypotheses, the prior and the update rule of the beliefs are part of the convention, and the members of $\I_c$ observe each other's actions exactly.
+\end{assumption}
+
+
+
+Agent $i$ observes $c_k$ but not the coverage inside $R_k$, which depends on $k$'s beliefs about the others. Its beliefs carry hypotheses about them, and it estimates the neighbour's price by its expectation.
+
+\begin{definition}[Estimated price]\label{def:est}
+\[
+\est{\lambda_k\rho_{ki}}{i}:=\E_{w_{ik}}\big[\lambda_k\rho_{ki}\big],\qquad\lambda_k=-\Psi'(s_k),\quad s_k=-(c_k+R_k),
+\]
+with $c_k$ observed and $R_k$ computed under each hypothesis about $k$'s beliefs. Under a hypothesis in which $k$ does not follow the convention, $k$ holds no copy and no costate, and the share $i$ leaves it buys nothing: the price under that hypothesis is zero. Hence the estimate is at most $w_{ik}(\F)$ times the price under the following hypotheses.
+\end{definition}
+
+\begin{proposition}[Exact estimates]\label{prop:exact}
+Under Assumptions~\ref{ass:allow} and \ref{ass:public}, and if $w_{ik}(\F)=1$, $\est{\lambda_k\rho_{ki}}{i}=\lambda_k\rho_{ki}$.
+\end{proposition}
+\begin{proof}
+$k$'s beliefs are the output of a public rule applied to observations that $i$ shares, so $i$'s belief puts a point mass on them; $a_k$ is known and $c_k$ is observed, so $R_k$, $s_k$, $\lambda_k$ and $\rho_{ki}$ are determined. With $w_{ik}(\F)=1$ no mass sits on the hypotheses whose price is zero.
+\end{proof}
+
+The estimate includes the coverage that $k$ holds against the others: what $k$ pays for its uncertainty is visible to its neighbours. For a constraint shared by two agents, the only belief of $k$ that enters $R_k$ is its belief about $i$, which $i$ replicates from its own actions. The hypothesis that $k$ is certain about all members gives $R_k=-a_k$ and the public reading $-\Psi'(a_k-c_k)$; used alone, it underestimates the costate whenever $k$ holds coverage.
+
+Which prices can be read at all is decided by what they depend on. With several constraints, $k$'s costate on a constraint it shares with $i$ alone, $\I_m=\{i,k\}$, is $\lambda^m_k=-\Psi'(s^m_k)$, $s^m_k=-(c^m_k(u_k)+R^m_k)$, and $R^m_k=r^m_{ki}+U^m_{ki}$ involves only the pair's agreement and $k$'s belief about $i$.
+
+\begin{proposition}[Locality of readable prices]\label{prop:local}
+Under Assumption~\ref{ass:public}, a quantity of agent $k$ can be read by a neighbour $i$ without messages only if it is a function of what $i$ observes and of the public rule applied to it. (i) For a constraint with two members, $\I_m=\{i,k\}$, $\lambda^m_k$ is such a function of $u_k$, $r^m_{ki}=-r^m_{ik}$ and $w_{ki}$, all available to $i$. (ii) Any aggregate over $k$'s contacts that depends on its agreements $r^m_{kl}$ with other agents $l$ (the costate $\lambda^m_k$ of a constraint with more than two members, or an allotment of $k$'s risk across its contacts) depends on the history of those agreements, hence on the prices of $l$, and recursively on the whole connected group of contacts. It is readable only if $i$ observes that whole group.
+\end{proposition}
+\begin{proof}
+(i) $c^m_k(u_k)$ is observed, $r^m_{ki}$ is $i$'s own number with the opposite sign, and $w_{ki}$ is the output of the public rule on $i$'s own actions. (ii) $r^m_{kl}$ evolves by the exchange law with $\lambda_k$ and $\lambda_l$; $\lambda_l$ depends on $l$'s agreements with its own neighbours, and so on along every path of contacts.
+\end{proof}
+
+A common price over a group, the property that would make agents a gas, is exactly a price that depends on loads anywhere in the group, and by (ii) it cannot be read locally. Without messages the public prices of constraints shared by two agents live on the contacts; agent-level quantities can be defined, but they are private (Section~\ref{sec:thermo}).
+
+\subsection{The exchange law}\label{sec:exchange}
+An agreement is held in two copies, so both agents must update it with the same numbers. Only quantities both observe qualify: their costates, read under mutual trust. With several specifications (Section~\ref{sec:specs}) each has its own slack and costate, and the exchange on an agreement uses the costates of that specification; we keep the single-constraint notation $\lambda_i$.
+
+\begin{definition}[Exchange law]\label{def:exchange}
+An agent cannot tell which neighbours follow the convention, so it applies one rule to every neighbour. Under Assumptions~\ref{ass:allow} and \ref{ass:public}, both agents of a pair compute the same two costates $\lambda_i\rho_{ik}$ and $\lambda_k\rho_{ki}$, each as it is if its holder follows the convention (Proposition~\ref{prop:exact}), and the same two following masses $w_{ik}(\F)$, $w_{ki}(\F)$, which are outputs of the public rule. Both copies move by one number, weighted by mutual trust:
+\[
+\dot r_{ik}=-\dot r_{ki}=-\kappa\,\eta_{ik}\big(\lambda_i\rho_{ik}-\lambda_k\rho_{ki}\big),\qquad \eta_{ik}:=w_{ik}(\F)\,w_{ki}(\F),\qquad\kappa>0.
+\]
+\end{definition}
+The agent with the higher price leaves less room. Each agent treats the other as it would treat itself and discounts the exchange by the doubt of either side; nothing beyond Proposition~\ref{prop:exact} is read. Discretisation, and the step size it requires, depend on the choice of $\Psi$ and are deferred to the implementation.
+
+\begin{theorem}[Agreements and equilibria]\label{thm:exchange}
+(i) Whatever the beliefs, the exchange law preserves \eqref{eq:pair} exactly: $\frac{d}{dt}(r_{ik}+r_{ki})=0$.
+(ii) If both follow the convention, $\frac{d}{dt}(E_i+E_k)=-\kappa\,\eta_{ik}(\lambda_i\rho_{ik}-\lambda_k\rho_{ki})^2\le0$, and where $\eta_{ik}>0$ the stationary points satisfy $\lambda_i\rho_{ik}=\lambda_k\rho_{ki}$: equal prices.
+(iii) If every member follows the convention and all are certain about each other, $\eta=\rho=1$ and the stationary points are the KKT points of $\min\sum_if_i$ s.t.\ \eqref{eq:c} as $\Psi\to0$; with node variables $r_{ik}=y_i-y_k$ and costates communicated it is the update $\dot y_i=-k_0\sum_k(c_i-c_k)$ of Tan, Liu, Johansson and Dimarogonas.
+(iv) Toward a neighbour $k$ whose following mass $w_{ik}(\F)$ in $i$'s belief is small, $\eta_{ik}\le w_{ik}(\F)$ and $\rho_{ik}\to0$ because $\A[\max(c_k,r_{ik})]\to\A[c_k]$ no longer depends on $r_{ik}$. The agreement with such a neighbour freezes; nothing in the room of $i$ uses $k$'s copy, so safety is unaffected.
+\end{theorem}
+\begin{proof}
+(i) Both copies move by the same number with opposite signs. (ii) By Proposition~\ref{prop:prices}, $\frac{d}{dt}(E_i+E_k)=\lambda_i\rho_{ik}\dot r_{ik}+\lambda_k\rho_{ki}\dot r_{ki}=(\lambda_i\rho_{ik}-\lambda_k\rho_{ki})\dot r_{ik}$. (iii) KKT of the central problem in primal decomposition. (iv) Proposition~\ref{prop:prices} and $w_{ki}(\F)\le1$.
+\end{proof}
+
+\begin{remark}[Noisy observations]\label{rem:noisy}
+If observations are noisy, Assumption~\ref{ass:public} fails and the estimates of Definition~\ref{def:est} are not point masses. The copies then drift apart by $\Delta_{ik}:=r_{ik}+r_{ki}$, with $\dot \Delta_{ik}=\kappa(e_i+e_k)$, $e_k:=\est{\lambda_k\rho_{ki}}{i}-\lambda_k\rho_{ki}$. Errors arise only while the constraint is active, where hypotheses are distinguished; if wrong hypotheses lose mass as $e^{-Dn}$, $|\Delta_{ik}|\lesssim2\kappa\Delta t\,\Delta\lambda/(1-e^{-D})$, with $\Delta\lambda$ the spread of predicted prices. Soundness is unaffected, since the room never uses the neighbour's copy; a negative gap only adds $\A[(-\Delta_{ik})_+]$ to the coverage of a cooperating neighbour. The decrease in (ii) then holds in expectation when the beliefs are correct.
+\end{remark}
+
+\begin{remark}[Why one weight for both copies]\label{rem:uncertain}
+The weight $\eta_{ik}$ is symmetric and computable by both agents, so the copies stay exactly opposite under uncertain following and Proposition~\ref{prop:agree} holds at all times. A weight that differed between the two copies would make $r_{ik}+r_{ki}$ drift, and the drift would have to be added to the coverage.
+\end{remark}
+
+\section{Laws}\label{sec:laws}
+What follows from the three blocks; it answers requirement (b). Equal prices are the optimum of the group, also under loads from outside (Theorems~\ref{thm:eq}, \ref{thm:load}), and the multiplier on the cost bounds the differences of paid cost (Proposition~\ref{prop:fairconv}).
+
+\subsection{Equilibrium}
+\begin{definition}[Equilibrium]
+Fix the beliefs. A state $(u,r)$ of decisions and agreements is an equilibrium if every $u_i$ solves \eqref{eq:local} and $\lambda_i=\lambda_k$ for every pair that holds an agreement and trusts each other.
+\end{definition}
+
+\begin{theorem}[Equilibrium]\label{thm:eq}
+Fix the beliefs, and let $P$ be the set of pairs of agents that follow the convention.
+(i) The equilibria are the minimisers of the convex problem
+\[
+\min_r\ \sum_iE_i\big(R_i(r)\big)\quad\text{s.t.}\quad r_{ik}+r_{ki}=0\ \ ((i,k)\in P),
+\]
+the common price of a pair being the multiplier of its constraint.
+(ii) Along the exchange law, $\frac{d}{dt}\sum_iE_i=-\kappa\sum_{(i,k)\in P}(\lambda_i\rho_{ik}-\lambda_k\rho_{ki})^2\le0$; if the agreements remain bounded (as they do when each is confined to the capability range of the pair), trajectories approach the set of equilibria.
+(iii) If every agent sharing the constraint follows the convention and all are certain about each other, the equilibrium is the solution of $\min\sum_i\beta_if_i$ s.t.\ \eqref{eq:c} as $\Psi\to0$, for fixed multipliers; with $\beta\equiv1$ this is the central problem $\min\sum_if_i$.
+(iv) Otherwise it is the solution of the certified problem in which each agent's constraint is $c_i(u_i)+R_i\le0$, with the untrusted neighbours' terms replaced by their certified bounds: the efficiency given up is the price of what the agents do not know.
+\end{theorem}
+\begin{proof}
+(i) $a_i$ and $a_k$ are linear in $r$, $(c_k-a_k)_+$ is convex in $a_k$, and $\A$ is convex and nondecreasing (Lemma~\ref{lem:props}(iii),(vi)), so $R_i$ is convex in $r$; $E_i$ is convex and nondecreasing in $R_i$ as the optimal value of a convex problem with $R_i$ on the right-hand side. The KKT conditions of the problem are $\lambda_i=\lambda_k=\mu_{ik}$ on $P$. (ii) Theorem~\ref{thm:exchange}(ii), summed, and LaSalle's principle on the bounded set of agreements. (iii) $U=0$, $R_i=\sum_kr_{ik}$, and the problem is the primal decomposition of the central problem. (iv) Direct.
+\end{proof}
+
+When observations change the beliefs, the problem in (i) changes and the equilibrium moves; as the beliefs about cooperating neighbours concentrate, $U\to0$ and the equilibrium approaches the central optimum.
+
+With several specifications, $R_i=(R^m_i)_{m\in\mathcal M_i}$ is a vector of rooms, one per specification, and $E_i$ is jointly convex and nondecreasing in it as the optimal value of a convex problem with the rooms on the right-hand side. Theorem~\ref{thm:eq} holds unchanged with one agreement constraint, and one common price, per specification and pair.
+
+\subsection{Equilibrium with external loads}\label{sec:loadeq}
+Let $C$ be the agents that follow the convention, $P$ the pairs among them whose agreements are still exchanged, and $L_i:=\sum_kL_{ik}$ the total load on agent $i$ from neighbours whose following mass has vanished. For a constraint shared by the group, the room of a cooperating agent is
+\[
+R_i(r)=\sum_{j:(i,j)\in P}r_{ij}+\sum_jU_{ij}+L_i .
+\]
+
+\begin{theorem}[Equilibrium under external loads, one shared constraint]\label{thm:load}
+Fix the beliefs. (i) The equilibria are the minimisers of
+\[
+\Phi(L):=\min_r\sum_{i\in C}E_i\big(R_i(r)\big)\quad\text{s.t.}\quad r_{ij}+r_{ji}=0\ \ ((i,j)\in P),
+\]
+and, on every connected component $\Gamma$ of $(C,P)$, all costates are equal to a common value $\lambda^\star_\Gamma$. (ii) The load is shared: an external agent pressing on one member raises the costate of every member of its component, and the exchange moves room toward that member until the common costate is restored. (iii) The cost of an external agent to the group is priced by that common costate: $\partial\Phi/\partial L_{ik}=\lambda^\star_{\Gamma(i)}$.
+\end{theorem}
+\begin{proof}
+(i) Theorem~\ref{thm:eq}(i) with $L_i$ a constant in $R_i$; the multipliers of the agreement constraints equalise costates along every edge of $P$, hence on components. (ii) $E_i$ is convex and nondecreasing in $R_i$, so a larger $L_i$ raises $\lambda_i$ at fixed $r$; the exchange law decreases $\sum E$ by moving room toward the agent with the larger costate. (iii) Envelope theorem for $\Phi$: $L_{ik}$ enters only $R_i$, and $\partial E_i/\partial R_i=\lambda_i=\lambda^\star_{\Gamma(i)}$ at the optimum.
+\end{proof}
+
+The cost of one unknown neighbour is thus spread over the agents that cooperate with the one it meets, at one price. A cooperating group sharing one constraint is a reservoir: the larger and less pressed it is, the lower the common costate, and the less an external load costs.
+
+With several constraints, each shared by two agents, every constraint $m=\{i,j\}$ has its own agreement and its own costate, and there is no common costate on a component. Part (i) holds with vector rooms, $R^m_i(r)=r^m_{ij}+U^m_{ij}$ on exchanged constraints and $R^m_i=L^m_{ij}$ on frozen ones, and part (iii) becomes
+\[
+\frac{\partial\Phi}{\partial L^m_{ij}}=\lambda^{m\star}_i,
+\]
+the force on that contact at equilibrium. Part (ii) is replaced by the force chain of Proposition~\ref{prop:transfer}: the load of $j$ on $i$ raises the force on the contacts of $i$ that lie opposite $j$, the exchange passes it on along them, and agents off that direction take none of it. This is also what the central certified problem does.
+
+\subsection{Arrival and departure}
+When an external agent arrives, the load $L_{ik}$ appears and the energy of the group rises by $\Delta\Phi\approx\lambda^\star L_{ik}$, with $\lambda^\star$ the common costate of the component for a shared constraint and the costate $\lambda^{m\star}_i$ of that constraint when each is shared by two agents; as the belief sharpens (its temperature is learned, its intent is tracked), $L_{ik}$ shrinks toward the worst usage the agent can actually reach, and $\Phi$ decreases. When it leaves, $L_{ik}$ vanishes and the group returns to its previous equilibrium. In the language of the first sections, an external agent is a heat source: it changes the energy through the belief rather than through exchange, and its effect is released when the belief no longer needs to cover it.
+
+Two cooperating agents facing the same external agent each carry their own load, $L_{ik}$ and $L_{jk}$; they share the burden through their own agreement, not through a common bound on $k$. Sharing the risk on $k$ itself would require a specification on $k$, such as a bound on the probability that $k$ violates any constraint, which the construction does not assume.
+
+\subsection{Fairness over time}\label{sec:fair}
+With the multiplier of Definition~\ref{def:beta}:
+
+\begin{proposition}[Greedy descent]\label{prop:greedy}
+Along any trajectory $\dot\Phi=\sum_i\hat\beta_if_i$ with $\hat\beta_i=\beta_i/\sum_k\beta_k$. If every member follows the convention and all are certain about each other, the equilibrium of Theorem~\ref{thm:eq} for the costs $\beta_if_i$ minimises $\sum_i\beta_if_i$ subject to \eqref{eq:c} as $\Psi\to0$: among the decisions that meet the constraint it is the one at which $\Phi$ grows most slowly.
+\end{proposition}
+\begin{proof}
+$\dot\Phi=\sum_i(\partial\Phi/\partial W_i)\dot W_i$ and $\dot W_i=f_i$; the second statement is Theorem~\ref{thm:eq}(iii) for the costs $\beta_if_i$.
+\end{proof}
+
+The descent is greedy: it does not anticipate later encounters. What it achieves over time can be computed for quadratic costs.
+
+\begin{proposition}[Two agents]\label{prop:pair}
+Let $f_i=\frac\omega2\|u_i-u_i^0\|^2$ for both agents of a pair that share one linear specification with gradients of equal norm $\gamma$, as in Example~\ref{ex:ca}, and let the specification require a joint yield $D>0$, $g_i^\top(u_i-u_i^0)+g_k^\top(u_k-u_k^0)=-D$, against a hard wall. At the equilibrium $\lambda_i=\lambda_k$,
+\[
+\|u_i-u_i^0\|=\frac{\beta_k}{\beta_i+\beta_k}\,\frac D\gamma,\qquad
+\dot W_i=\frac b4\,(1-\chi_{ik})^2,\qquad b:=\frac{\omega D^2}{2\gamma^2},\qquad\chi_{ik}:=\frac{\beta_i-\beta_k}{\beta_i+\beta_k}=\tanh\frac{W_i-W_k}{2W_0},
+\]
+so that
+\[
+\frac d{dt}(W_i-W_k)=-b\,\chi_{ik},\qquad\dot W_i+\dot W_k=\frac b2\big(1+\chi_{ik}^2\big).
+\]
+With $B(t)=\int_0^tb\,d\tau$ and $d:=(W_i-W_k)/W_0$, $\sinh\frac{d(t)}2=\sinh\frac{d(0)}2\,e^{-B(t)/(2W_0)}$. Without the multiplier ($\beta\equiv1$) the two pay $b/4$ each and $W_i-W_k$ does not change.
+\end{proposition}
+\begin{proof}
+Stationarity gives $u_i-u_i^0=-\lambda g_i/(\beta_i\omega)$; the specification then fixes $\lambda=\omega D/\big(\gamma^2(\beta_i^{-1}+\beta_k^{-1})\big)$. Insert in $f_i$ and use \eqref{eq:gibbs}. The last identity integrates $\dot d=-(b/W_0)\tanh(d/2)$.
+\end{proof}
+
+\begin{definition}[Equilibrium in paid cost]\label{def:Weq}
+A profile $W$ is an equilibrium in paid cost if the differences $W_i-W_k$ are stationary, that is $\dot W_i=\dot W_k$ for all $i,k$.
+\end{definition}
+
+\begin{proposition}[Equal costates of paid cost]\label{cor:Weq}
+In the setting of Proposition~\ref{prop:pair},
+\[
+\frac d{dt}(W_i-W_k)=-b\,\frac{\beta_i-\beta_k}{\beta_i+\beta_k},
+\]
+so the pair is at an equilibrium in paid cost if and only if $\beta_i=\beta_k$, if and only if $W_i=W_k$, and every trajectory with $B(t)\to\infty$ converges to it.
+\end{proposition}
+\begin{proof}
+Proposition~\ref{prop:pair} with the definition of $\chi_{ik}$.
+\end{proof}
+
+The two equilibria have the same form. The room is moved by the difference of its costates, $\dot r_{ik}=-\kappa(\lambda_i-\lambda_k)$, until $\lambda_i=\lambda_k$; the paid cost is moved by the difference of its costates, as in Proposition~\ref{cor:Weq}, until $\beta_i=\beta_k$. The first runs through the exchange law and is fast; the second needs no law of its own, since $\beta_i$ enters the agent's own problem \eqref{eq:local} and the difference of paid cost follows from the decisions, on the slower scale of the paid cost.
+\begin{center}
+\begin{tabular}{lll}
+\hline
+ & room & paid cost\\
+\hline
+lives on & a contact & an agent\\
+state & agreement $r_{ik}$ & $W_i=\int f_i\,dt$\\
+potential & $\sum_iE_i$ & $\Phi=W_0\ln\sum_ie^{W_i/W_0}$\\
+costate & $\lambda_i=\partial E_i/\partial R_i$ & $\beta_i=\partial\Phi/\partial W_i$\\
+constraint it prices & $r_{ik}+r_{ki}=0$ & $W_i\le\bar W$\\
+motion & $\dot r_{ik}=-\kappa(\lambda_i-\lambda_k)$ & $\frac d{dt}(W_i-W_k)=-b\,\frac{\beta_i-\beta_k}{\beta_i+\beta_k}$\\
+equilibrium & $\lambda_i=\lambda_k$ & $\beta_i=\beta_k$ (pair)\\
+\hline
+\end{tabular}
+\end{center}
+
+The agent that has paid more pays less from now on, and the difference decays at a rate set by $W_0$. The pair pays $\frac b2\chi_{ik}^2$ more than the least total cost while their multipliers differ, and nothing more once they agree: this excess is the price of fairness. Summing Proposition~\ref{prop:pair} over the contacts of an agent, with intensities $b_{ik}=b_{ki}\ge0$,
+\begin{equation}\label{eq:Wdyn}
+\dot W_i=F_i(W):=\frac14\sum_kb_{ik}\Big(1-\tanh\frac{W_i-W_k}{2W_0}\Big)^2
+=\sum_k\Big[\frac{b_{ik}}4+\frac{b_{ik}}4\chi_{ik}^2-\frac{b_{ik}}2\chi_{ik}\Big].
+\end{equation}
+The last term is antisymmetric in the pair: it moves cost from the agent that has paid more to the one that has paid less and changes no total.
+
+\begin{proposition}[Fixed contacts]\label{prop:fairconv}
+Let the intensities $b_{ik}$ be constant and their graph connected, and write $B_i:=\sum_kb_{ik}$.
+(i) For two solutions $W$, $W'$ of \eqref{eq:Wdyn}, $\max_i(W_i-W_i')-\min_i(W_i-W_i')$ is nonincreasing.
+(ii) If a balanced profile exists, that is $d^\star$ and $v^\star$ with $F_i(W_0d^\star)=v^\star$ for all $i$, then it is unique up to a common shift and every solution satisfies
+\[
+W_i(t)-W_k(t)\ \longrightarrow\ W_0\,(d^\star_i-d^\star_k),
+\]
+where $d^\star$ does not depend on $W_0$. Without the multiplier, $W_i(t)-W_k(t)=W_i(0)-W_k(0)+\frac14(B_i-B_k)\,t$.
+(iii) $F_i\le B_i$, so a balanced profile requires $v^\star\le\min_iB_i$: an agent cannot take more than all of its own contacts.
+\end{proposition}
+\begin{proof}
+$F_i$ is nonincreasing in each $W_i-W_k$ and unchanged by a common shift. (i) Let $z=W-W'$ and let $i$ attain $\max z$. Then $W_i-W_k\ge W'_i-W'_k$ for every $k$, so $\dot z_i=F_i(W)-F_i(W')\le0$; likewise $\dot z\ge0$ at the minimum. (ii) $W'(t)=W_0d^\star+v^\star t$ is a solution, so by (i) the differences $W_i-W_k$ stay bounded and $V:=\max z-\min z$ converges. The differences obey an autonomous system; on its limit set $V$ is constant. Solutions are real-analytic, so on an interval where $\max z$ is constant some $z_i$ equals it throughout, hence $\dot z_i\equiv0$; every term of $F_i(W)-F_i(W')$ is nonpositive and vanishes only if $z_k=z_i$, so every neighbour of $i$ attains the maximum throughout, and by connectedness all agents do. Thus $V=0$ on the limit set, which gives convergence and uniqueness. The scaling $W=W_0x$ removes $W_0$ from the equation for $d^\star$. (iii) $(1-\tanh)^2\le4$.
+\end{proof}
+
+The balanced profile of (ii) is the equilibrium in paid cost of Definition~\ref{def:Weq} for many agents: it is unique and every solution converges to it. There the costates of paid cost stand in fixed ratios, $\beta_i/\beta_k=e^{d^\star_i-d^\star_k}$, which are all one when the loads $B_i$ are equal ($d^\star=0$, since $F_i(0)=B_i/4$). In short,
+\[
+W_i(t)-W_k(t)\to\text{const},\qquad \dot W_i(t)-\dot W_k(t)\to0\qquad\text{for all }i,k,
+\]
+adjacent or not: all agents of a connected group come to pay at one common rate $v^\star>0$, and the relative difference vanishes,
+\[\frac{W_i(t)-W_k(t)}{W_i(t)}=\frac{W_0\,(d^\star_i-d^\star_k)}{v^\star t}\,\big(1+o(1)\big)\ \to\ 0,\]
+whereas without the multiplier it tends to $(B_i-B_k)/B_i$. The convergence in (ii) holds from every initial profile: a difference built up while the assumptions did not hold, for instance under loads from outside that the members cannot pass on, is removed once they hold again, at the rate $b_{ik}\chi_{ik}$ across each contact, that is $b_{ik}$ while the difference exceeds a few $W_0$. The fairness reached is equality of burden, whichever agent the contacts fall on. Unlike the costate of the room, of which there is one per contact, $\beta_i$ is one scalar per agent, and this equilibrium is one for the whole group.
+
+Without the multiplier the differences of paid cost grow with the difference of the agents' loads; with it they are bounded and proportional to $W_0$, as long as no agent is so rarely in contact that (iii) fails. For a star, the hub with $n$ spokes of equal intensity carries $d^\star_{\mathrm{hub}}-d^\star_{\mathrm{spoke}}=2\tanh^{-1}\frac{\sqrt n-1}{\sqrt n+1}$. When contacts form and break, \eqref{eq:Wdyn} holds with time-varying intensities; this case is examined numerically in Section~\ref{sec:fairnum}.
+
+\section{Thermodynamic reading}\label{sec:thermo}
+The construction was built from optimisation and risk alone. Its quantities nevertheless carry a thermodynamic structure, which this section makes explicit; it organises what was shown so far and is used in the sections that follow.
+
+The picture is a crowd, or a packing of soft balls. Each agent is a system of its own, like a small elastic body: what it shares with others lives on its contacts (forces, agreements, entropy budgets), and what describes the agent as a whole (energy, pressure, temperature) is its own summary. Contacts open and close as agents move; while a contact is open, the two agents observe each other and move the wall between them, the agreement, until the forces across it balance. Something pushing from outside is a wall that does not respond, and its push is carried through the crowd along the contacts that lie in its direction. Observation changes what each agent knows, and what it learns or loses enters as heat. One principle sorts the quantities: \emph{public quantities live on contacts, private summaries on agents}. Public means readable by the neighbour without messages, and by Proposition~\ref{prop:local} that confines it to what the two members of a contact both observe. Mechanics stays at the contacts also because space toward one neighbour cannot be traded for space toward another.
+
+We write the general case: agent $i$ shares the constraints $m\in\mathcal M_i$, each with slack $s^m_i$, room $R^m_i$, costate $\lambda^m_i=-\Psi'(s^m_i)$ and an agreement $r^m_{ik}$ toward every other member $k$. A contact of agent $i$ is a constraint it shares. In the collision-avoidance instance (Example~\ref{ex:ca}) every contact has one other member, $\I_m=\{i,k\}$; a single constraint shared by one group is the case of one contact per agent, $\lambda^m_i=\lambda_i$. In the dictionary (Section~\ref{sec:dict}), quantities that carry a constraint $m$ are public and quantities indexed by an agent $i$ alone are private summaries.
+
+\subsection{First law}
+\begin{proposition}[First law]\label{prop:first}
+At fixed state,
+\[
+dE_i=\underbrace{\sum_{m,k}\lambda^m_i\rho^m_{ik}\,dr^m_{ik}}_{\text{work at the contacts}}+\underbrace{\sum_m\lambda^m_i\theta^{m\star}_i\,dS^m_i}_{\text{entropy budget}}+\underbrace{\sum_{m,k}\lambda^m_i\Big\langle\frac{\partial U^m_{ik}}{\partial w_{ik}},dw_{ik}\Big\rangle}_{\text{heat: belief}}+\underbrace{f_i\,d\beta_i}_{\text{paid cost}},
+\]
+with $\rho^m_{ik}:=\partial R^m_i/\partial r^m_{ik}$, $S^m_i:=\ln(1/\delta^m_i)$ the entropy budget of constraint $m$ and $\theta^{m\star}_i:=\partial R^m_i/\partial S^m_i=\sum_k\theta^{m\star}_{ik}$ the sum of the decision temperatures of its coverages. At the internal equilibrium of the risk (Proposition~\ref{prop:temp}) the second term is $T_i\,dS_i$, and
+\[
+dE_i=\sum_{m,k}\lambda^m_i\rho^m_{ik}\,dr^m_{ik}+T_i\,dS_i+\delta Q_i+f_i\,d\beta_i,\qquad \delta Q_i=\sum_{m,k}\delta Q^m_{ik},
+\]
+with $f_i$ taken at the optimum of \eqref{eq:local} and, by Definition~\ref{def:beta}, $d\beta_i=\beta_i(f_i-\bar f)\,dt/W_0$.
+\end{proposition}
+\begin{proof}
+$dE_i=\sum_m\lambda^m_i\,dR^m_i+(\partial E_i/\partial\beta_i)\,d\beta_i$ by the envelope theorem in $u_i$, with $\partial E_i/\partial\beta_i=f_i$; $R^m_i$ depends on $r$ as in Proposition~\ref{prop:prices}, on $S^m_i$ through $\A$ with $\partial\A/\partial S=\theta^\star$ by the envelope theorem in $\theta$, and on $w$ through the expectations. The reduced form is the envelope theorem for the optimal allotment.
+\end{proof}
+
+The four terms differ in who moves them. The first is moved by the agents themselves, in pairs and conservatively; the second by the designer, who fixes the agent's entropy $S_i$, and by the agent, which allots it to its contacts (Section~\ref{sec:temp}); the third by observations; the fourth by the agent's own ledger of paid cost, and it vanishes when the agent pays at the mean rate, $f_i=\bar f$. The first has a conservation law at every contact, and therefore an equilibrium condition at every contact.
+
+\subsection{Second law}
+Exchange is dissipative: at fixed beliefs and fixed multipliers $\beta$, by Theorem~\ref{thm:eq}(ii),
+\[
+\frac{d}{dt}\sum_iE_i\Big|_{\text{exchange}}=-\kappa\sum_m\sum_{(i,k)\in P_m}(\lambda^m_i\rho^m_{ik}-\lambda^m_k\rho^m_{ki})^2\le0,
+\]
+with $P_m$ the pairs of members of $m$ that follow the convention, and with equality only when every contact is balanced. The balance is checked contact by contact, but it is not local: by Theorem~\ref{thm:eq} the balanced state is the minimiser of the total energy of the group, the contacts are coupled through each agent's own problem (Proposition~\ref{prop:transfer}), and they balance together. A truss is in equilibrium in the same way: minimum potential energy, verified by force balance at every joint and action and reaction in every member. A force difference across a wall always moves the wall toward the weaker side, never the other way, and the energy it releases is the efficiency gained by the group.
+
+\subsection{Forces, pressure and the force chain}\label{sec:force}
+Define the contact force on agent $i$ from constraint $m$ as
+\[
+\phi^m_i:=-\lambda^m_i\,\nabla_{u_i}c^m_i(u_i).
+\]
+For $f_i=\frac{\omega_i}2\|u_i-u_i^0\|^2$ and away from the bounds on the input, the optimality conditions of \eqref{eq:local} read $\beta_i\omega_i(u_i-u_i^0)=\sum_{m\in\mathcal M_i}\phi^m_i$: the agent is displaced from its preferred motion by exactly the resultant of its contact forces. The equal prices of Theorem~\ref{thm:eq} are action and reaction at every contact. In the collision-avoidance instance, $m=\{i,k\}$ and $g^m_i(u_i)=-2d_{ik}^\top u_i-\frac\kappa2h_{ik}$ with $d_{ik}=p_i-p_k$, so $\phi^m_i=2\lambda^m_id_{ik}$ points away from $k$, and the virial
+\[
+P_i:=\tfrac12\sum_{m=\{i,k\}\in\mathcal M_i}\langle\phi^m_i,d_{ik}\rangle=\sum_{m=\{i,k\}\in\mathcal M_i}\lambda^m_i\|d_{ik}\|^2
+\]
+is the pressure of the agent, the isotropic part of the stress $\frac12\sum_m\phi^m_i\otimes d_{ik}$. It summarises how hard the agent is pressed, but it is not what the exchange equalises: an agent with a goal is not indifferent to which wall moves, so it is a grain rather than a cell of gas, and its balance is a balance of forces, contact by contact.
+
+How a push on one contact reaches another is the following.
+
+\begin{proposition}[Force chain]\label{prop:transfer}
+Let the contacts $m\in\mathcal K\subseteq\mathcal M_i$ of agent $i$ be in the layer of $\Psi$ with linear terms $c^m_i$, the bounds on the input inactive and $f_i=\frac{\omega_i}2\|u_i-u_i^0\|^2$, and let $G$ be the matrix with rows $\nabla_{u_i}c^{m\top}_i$, $m\in\mathcal K$. Then, with $\lambda_i=(\lambda^m_i)_{m\in\mathcal K}$ and $R_i=(R^m_i)_{m\in\mathcal K}$,
+\[
+\frac{\partial\lambda_i}{\partial R_i}=k_e\,\omega_i\big(\omega_iI+k_eGG^\top\big)^{-1}=:K_i .
+\]
+For one contact, $K_i=k_e\,a^m_i$ with $a^m_i=\omega_i/(\omega_i+k_e\|\nabla c^m_i\|^2)$; in the collision-avoidance instance $\|\nabla g^m_i\|=\alpha_{ik}=2\|d_{ik}\|$. For two contacts $m=\{i,j\}$ and $m'=\{i,k\}$ of that instance, the sign of $\partial\lambda^{m'}_i/\partial R^m_i$ is that of $-\langle d_{ij},d_{ik}\rangle$. At a wall or at the speed bound the agent cannot move, and $K_i\to k_eI$. With the fairness multiplier, $\omega_i$ is replaced by $\beta_i\omega_i$.
+\end{proposition}
+\begin{proof}
+In the layer, the penetration of contact $m$ is $q^m=\epsilon+c^m_i(u)+R^m_i$ and $\lambda^m_i=k_eq^m$. Stationarity gives $u-u^0=-(k_e/\omega_i)G^\top q$, so $q=b+R-(k_e/\omega_i)GG^\top q$ with $b$ independent of $R$, i.e.\ $\lambda=k_e\omega_i(\omega_iI+k_eGG^\top)^{-1}(b+R)$. For two rows the off-diagonal of the inverse of $\omega_iI+k_eGG^\top$ is $-k_e\langle\nabla c^m_i,\nabla c^{m'}_i\rangle/\det$, and in the instance $\langle\nabla g^m_i,\nabla g^{m'}_i\rangle=4\langle d_{ij},d_{ik}\rangle$. At a wall or at the speed bound the input does not move with $R$, and $\partial\lambda/\partial R=k_e$.
+\end{proof}
+
+A push from $j$ that drives $i$ toward $k$ ($\langle d_{ij},d_{ik}\rangle<0$) raises the force on the contact with $k$, and the exchange then passes it to $k$ by moving that wall; a push at right angles does not reach $k$, and a push from the side of $k$ relieves it. Outside pressure is therefore released along the agents that lie in its direction, as in a force chain of a granular packing, and the central optimum does the same: its multipliers are one per contact and differ from contact to contact. A single common pressure over a group (Theorem~\ref{thm:load}) is the picture of one constraint shared by the whole group.
+
+\subsection{Temperature}\label{sec:temp}
+\begin{proposition}[The decision temperature is $\partial\A/\partial S$]\label{prop:theta}
+Write $S=\ln(1/\delta)$. Then
+\[
+\A(S)=\sup_Q\{\E_Q[X]:\mathrm{KL}(Q\|w)\le S\}=\min_{\theta>0}\Big[\theta\ln\E_we^{X/\theta}+\theta S\Big],
+\]
+the supremum is attained by the tilted law $Q^\star(dx)\propto e^{x/\theta^\star}w(dx)$, and $d\A/dS=\theta^\star$.
+\end{proposition}
+\begin{proof}
+The first equality is Lemma~\ref{lem:props}(iv). Attach a multiplier $\theta>0$ to the entropy constraint: $\A(S)=\min_{\theta>0}\sup_Q\{\E_Q[X]-\theta(\mathrm{KL}(Q\|w)-S)\}$, by convex duality since the objective is linear and the constraint convex in $Q$. By the Donsker--Varadhan formula the inner supremum is $\theta\ln\E_we^{X/\theta}+\theta S$, attained at $Q\propto e^{X/\theta}w$. The envelope theorem in $\theta$ gives $d\A/dS=\theta^\star$.
+\end{proof}
+
+The worst prediction within the entropy budget is a Boltzmann law at temperature $\theta^\star$, and $\theta^\star$ is the derivative of the bound, an energy in units of the constraint, with respect to the entropy budget. This is the mirror of the canonical ensemble: there entropy is maximised under an energy constraint and $1/\theta=\partial S/\partial E$; here the worst mean is maximised under an entropy constraint and $\theta=\partial\A/\partial S$. In the units of agent $i$'s energy, $\partial E_i/\partial S^m_i=\lambda^m_i\theta^{m\star}_i$, the temperature of the contact.
+
+For a Gaussian prediction of the excess with standard deviation $\sigma$,
+\[
+\theta^\star=\frac{\sigma}{\sqrt{2S}},\qquad U=\mu+\sigma\sqrt{2S},
+\]
+so a neighbour the agent knows poorly is hot. Temperature thus measures ignorance in units of the constraint, and force times temperature, $\lambda^m_i\theta^{m\star}_i$, measures what that ignorance costs.
+
+An agent can be given one entropy and one temperature, as private summaries. Its contacts are separate constraints, so by the union bound $\Pr(\text{some constraint of }i\text{ fails})\le\sum_m\delta^m_i$ under its beliefs, and a per-step risk $\delta_i$ is met by any allotment $\sum_m\delta^m_i\le\delta_i$. Risk is the one quantity an agent can move freely between its contacts. In entropy units the allotment reads
+\[
+S_i:=\ln\frac1{\delta_i}=-\ln\sum_{m\in\mathcal M_i}e^{-S^m_i},\qquad \nu^m_i:=\frac{\partial S_i}{\partial S^m_i}=\frac{e^{-S^m_i}}{\sum_{m'}e^{-S^{m'}_i}}=\frac{\delta^m_i}{\delta_i}:
+\]
+the entropy of the agent is the log-partition function of the entropies of its contacts, and the share of risk on a contact is its Boltzmann weight.
+
+\begin{proposition}[Entropy and temperature of an agent]\label{prop:temp}
+Let each room $R^m_i$, as a function of $S^m_i$, satisfy $\theta^{m\star}_i+d\theta^{m\star}_i/dS^m_i\ge0$. Then $E_i$ is convex in $(\delta^m_i)_m$, and the allotment minimising $E_i$ at fixed agent entropy $S_i$ (equivalently, subject to $\sum_m\delta^m_i\le\delta_i$) satisfies
+\[
+\lambda^m_i\theta^{m\star}_i=T_i\,\nu^m_i\qquad\text{for every contact with }\delta^m_i>0,\qquad T_i:=\frac{\partial E_i^\star}{\partial S_i}\ge0,
+\]
+with $E_i^\star(S_i)$ the energy at the optimal allotment; $T_i$ is the temperature of the agent. For a Gaussian prediction the condition holds whenever $\delta^m_i\le e^{-1/2}$.
+\end{proposition}
+\begin{proof}
+$\partial R^m_i/\partial\delta^m_i=-\theta^{m\star}_i/\delta^m_i$ (Proposition~\ref{prop:prices}), and with $dS/d\delta=-1/\delta$, $\partial^2R^m_i/\partial(\delta^m_i)^2=(\theta^{m\star}_i+d\theta^{m\star}_i/dS)/(\delta^m_i)^2\ge0$, so each room is convex in its risk; $E_i$ is jointly convex and nondecreasing in the rooms, so the composition is convex. With multiplier $\mu_i$ on $\sum_m\delta^m_i\le\delta_i$, the KKT condition is $\lambda^m_i\theta^{m\star}_i/\delta^m_i=\mu_i$, and $\partial E_i^\star/\partial\delta_i=-\mu_i$; since $dS_i=-d\delta_i/\delta_i$, $T_i=\mu_i\delta_i$, which gives the stated form. For the Gaussian, $d\theta^\star/dS=-\theta^\star/(2S)$, nonnegative sum iff $S\ge\frac12$.
+\end{proof}
+
+The contact temperatures are therefore not independent: each is the agent's temperature times the weight of the contact, as the parts of a system in internal equilibrium share one temperature. At that equilibrium, $\delta^m_i\propto\lambda^m_i\theta^{m\star}_i$: risk flows to the contacts that are pressed and poorly known, and away from the contacts that cost nothing now. Temperatures equalise inside an agent, not between agents, since risk is not exchanged (Section~\ref{sec:analogy}); and an agent that allots its risk this way makes its room unreadable to its neighbours (Proposition~\ref{prop:local}(ii)). The implementation of Section~\ref{sec:impl} uses the fixed allotment $\delta^m_i=\delta$, which every neighbour can replicate.
+
+\subsection{Heat}\label{sec:heat}
+The entropy of the belief is changed by observation, not by the agents. For a Gaussian prediction, $\partial U/\partial\ln\sigma=\sigma\sqrt{2S}$, and the third term of the first law reads
+\[
+\delta Q^m_{ik}=\vartheta^m_{ik}\,dS^{b}_{ik},\qquad \vartheta^m_{ik}:=\lambda^m_i\sigma^m_{ik}\sqrt{2S^m_i},\qquad S^{b}_{ik}:=\ln\sigma^m_{ik}+\mathrm{const},
+\]
+with $\sigma^m_{ik}$ the standard deviation of the predicted excess of member $k$ in constraint $m$. The heat of the agent is the sum $\delta Q_i=\sum_{m,k}\delta Q^m_{ik}$ over its contacts, an extensive quantity like its entropy. Learning ($dS^b<0$) releases heat: the coverage shrinks and the energy falls. An unknown agent arriving, or a known one behaving unexpectedly, absorbs heat: the coverage grows. An external agent is therefore a heat source (Section~\ref{sec:external}): it changes the energy of the group through beliefs, never through exchange.
+
+\subsection{Trajectories}
+Over a trajectory the entropy budgets add: a trajectory-level risk $\varepsilon$ allotted as $\sum_t\delta_t\le\varepsilon$ (Proposition~\ref{prop:risk}) is a total budget $\sum_tS_{\delta_t}$ of relative entropy spent along the path, the quantity whose fluctuation theorem motivated this work (Seifert, 2005).
+
+\subsection{Where the analogy stops}\label{sec:analogy}
+Beliefs are not conserved and are not exchanged; there is no thermal equilibrium between agents, only inside an agent (Proposition~\ref{prop:temp}) and between an agent and what it observes. The fairness multiplier of Section~\ref{sec:fair} is not exchanged either: it equalises over time, through the split of the constraint, and not across a contact. Two members of a constraint could share its risk through a ledger of their own, as they share the constraint through the agreement, since one correct certificate suffices (Theorem~\ref{thm:sound}); that would be an exchange of entropy, with $T_i=T_k$ at equilibrium, and is not part of the construction. The entropy that has a conjugate in the sense of an equilibrium condition is the budget $S_i$, which the designer fixes per agent and the agent allots to its contacts; the entropy of the belief has a temperature only for families in which the coverage depends on the belief through one spread parameter. Pressure is equalised across a wall, not across a group: goal-directed agents are grains, not gas, and a common pressure over a group holds only for one constraint shared by the whole group. Each agent is thus described as an elastic body is: a stress at its contacts, which is public, and an energy, pressure and temperature, which are its own.
+
+\section{The closed loop}
+Sections~\ref{sec:localp}--\ref{sec:thermo} hold the state and the beliefs fixed. In operation the state $p$, the agreements $r$ and the beliefs $w$ move together. This section states what survives.
+
+\subsection{Safety along trajectories}
+\begin{assumption}[Recursive feasibility]\label{ass:rf}
+At every sampling instant, every local problem of a convention-following agent has a solution with $s_i\ge0$.
+\end{assumption}
+
+\begin{theorem}[Invariance among cooperating agents]
+Let the constraint be the barrier condition $\dot h\ge-\kappa h$ of a function $h$, split as in Example~\ref{ex:ca}, and let all members follow the convention. Under Assumption~\ref{ass:rf}, with inputs held over each sampling interval, $h(p_t)\ge-O(\Delta t^2)$ for all $t$ whenever $h(p_0)\ge0$; in continuous time, $\{h\ge0\}$ is forward invariant.
+\end{theorem}
+\begin{proof}
+By Proposition~\ref{prop:agree}, $s_i\ge0$ for all members gives $\sum_ic_i\le0$, i.e.\ $\dot h\ge-\kappa h$ at each sampling instant. Comparison with $\dot y=-\kappa y$ gives $h(p_t)\ge h(p_0)e^{-\kappa t}\ge0$ in continuous time; holding the input over $\Delta t$ adds an error of order $\|\ddot h\|\Delta t^2$.
+\end{proof}
+
+Against agents outside the convention the guarantee is per step and probabilistic, and it accumulates.
+
+\begin{proposition}[Risk along a trajectory]\label{prop:risk}
+If at step $t$ the bound uses risk $\delta_t$, then under the agent's beliefs $\Pr\big(\exists\,t\le T:c(u_t)>0\big)\le\sum_{t\le T}\delta_t$. A trajectory-level risk $\varepsilon$ is therefore obtained with $\delta_t=\varepsilon/T$ over a horizon $T$, or with $\delta_t=6\varepsilon/(\pi^2t^2)$ over an unbounded one.
+\end{proposition}
+\begin{proof}
+Union bound over steps of Theorem~\ref{thm:sound}.
+\end{proof}
+
+This is the point where the construction meets the trajectory-level view of Seifert: the per-step relative-entropy budget $\ln(1/\delta_t)$ is the share of a trajectory budget.
+
+\subsection{Agreements track the moving equilibrium}
+Write $r^\star(p,w)$ for the equilibrium of Theorem~\ref{thm:eq} at state $p$ and beliefs $w$, and $\Phi(r;p,w)=\sum_iE_i(R_i(r))$ restricted to the subspace $r_{ij}+r_{ji}=0$ of trusting pairs.
+
+\begin{theorem}[Tracking]\label{thm:track}
+Suppose $\Phi$ is $\mu$-strongly convex in $r$, $r^\star$ is $L$-Lipschitz in $p$, and $\|\dot p\|\le\bar v$ while the beliefs are constant. Then along the exchange law
+\[
+\limsup_{t\to\infty}\|r_t-r^\star(p_t,w)\|\le\frac{L\bar v}{\kappa\mu}.
+\]
+\end{theorem}
+\begin{proof}
+The exchange law is the gradient flow $\dot r=-\kappa\nabla_r\Phi$ on the subspace. With $e=r-r^\star$, strong convexity gives $e^\top\nabla_r\Phi\ge\mu\|e\|^2$, so $\frac{d}{dt}\frac12\|e\|^2\le-\kappa\mu\|e\|^2+\|e\|\,\|\dot r^\star\|$ with $\|\dot r^\star\|\le L\bar v$; Gronwall.
+\end{proof}
+
+When all members follow the convention and trust each other, $r^\star$ is the split of the central optimum (Theorem~\ref{thm:eq}(iii)), so the closed loop is the central optimal controller up to a tracking error that decreases with the exchange rate $\kappa$. Strong convexity holds when every $f_i$ is strongly convex in the decision and every share is active; on inactive shares $\Phi$ is flat and the agreement does not matter. In the layer, $\mu$ is set by the sensitivities of Proposition~\ref{prop:transfer}, $k_e(a_{ik}+a_{ki})$ for an isolated pair, which is small when the agents can move freely.
+
+\subsection{Beliefs and the approach to the central optimum}\label{sec:beliefconc}
+\begin{proposition}[Concentration]
+If the true behaviour of $k$ is one of the hypotheses and the window likelihoods of any other hypothesis fall short by a Kullback--Leibler divergence $D>0$ per step, the posterior mass of the wrong hypotheses decays as $e^{-Dn}$ over $n$ informative steps. For a neighbour that follows the convention, $U_{ik}\to0$ and the equilibrium approaches the central optimum.
+\end{proposition}
+
+Informative steps are those on which the hypotheses predict differently. Before a share activates, a neighbour that never yields predicts as a cooperating one, so $D=0$ and the belief does not move: compliance becomes testable only when it is tested. The implemented self-model is the pair row only (Section~\ref{sec:impl}); for behaviour outside it, concentration is not guaranteed.
+
+\subsection{Energy balance}
+Along the closed loop,
+\[
+\frac{d}{dt}\sum_iE_i=\underbrace{-\kappa\sum_m\sum_{(i,k)\in P_m}(\lambda^m_i-\lambda^m_k)^2}_{\text{exchange}\ \le0}+\underbrace{\sum_i\frac{\partial E_i}{\partial p}\dot p}_{\text{motion}}+\underbrace{\sum_i\sum_{m\in\mathcal M_i}\lambda^m_i\frac{\partial R^m_i}{\partial w}\dot w}_{\text{belief}} .
+\]
+Exchange always dissipates; motion and changing beliefs supply or remove energy. $\sum_iE_i$ is a Lyapunov function for the exchange, not for the closed loop.
+
+\subsection{What is not guaranteed}
+Liveness (Section~\ref{sec:limits}); recursive feasibility in the presence of agents outside the convention, which can surround a cooperating agent faster than it can escape; and the coupling of fast agreements with beliefs that change abruptly, for which Theorem~\ref{thm:track} gives no bound.
+
+
+\section{Numerical study}\label{sec:num}
+\subsection{Implementation}\label{sec:impl}
+This subsection fixes every choice left open above, for the collision-avoidance instance (Example~\ref{ex:ca}, Algorithm~\ref{alg:agent}).
+
+\paragraph{Agents and specification.} Single integrators $\dot p_i=u_i$, sampled at $\Delta t=0.02$\,s, with the speed bound $\|u_i\|\le1.2$ imposed as eight half-planes. Cost $f_i=\frac{\omega_i}2\|u_i-u_i^0\|^2$ with $u_i^0$ the unit-speed velocity toward the agent's current target. For every sensed neighbour $k$ within distance $5$ the constraint $m=\{i,k\}$ is the barrier condition of Example~\ref{ex:ca}, $c^m=g^m_i(u_i)+g^m_k(u_k)\le0$ with $g^m_i(u_i)=-2d_{ik}^\top u_i-\frac\kappa2h_{ik}$, $h_{ik}=\|d_{ik}\|^2-\rho^2$, $\kappa=2$, $\rho=1$. An agreement starts at $0$ when a neighbour enters the sensing range and is dropped when it leaves.
+
+\paragraph{Price and local problem.} The price is
+\[
+\Psi(s)=\frac{k_e}2(\epsilon-s)_+^2+M(-s)_+,
+\]
+with $k_e=20$ and $M=1000$. One slack per constraint is priced, so \eqref{eq:local} becomes the quadratic program
+\[
+\min_{u,\,q\ge0,\,z\ge0}\ \frac{\beta_i\omega_i}2\|u-u_i^0\|^2+\sum_{m\in\mathcal M_i}\Big(\frac{k_e}2(q^m)^2+Mz^m\Big)\ \ \text{s.t.}\ \ g^m_i(u)+R^m_i+\epsilon\le q^m,\ \ g^m_i(u)+R^m_i\le z^m,
+\]
+with $R^m_i=r^m_{ik}+U^m_{ik}$, solved by an active-set method. It is solvable for every room; where the walled problem is feasible and $M$ exceeds its multipliers, $z=0$. The exchanged costate is the multiplier of the layer row, $\lambda^m_i=k_eq^m=k_e(\epsilon-s^m_i)_+$; it excludes $M$, so it moves with the room at rate $k_e$ at the wall (Proposition~\ref{prop:transfer}). An agent at rest already pays the layer inside the distance $\sqrt{1+2\epsilon/\kappa}$ from a neighbour, which acts as an effective contact distance.
+
+\paragraph{Estimating costates.} Beliefs follow a public rule (Assumption~\ref{ass:public}), so each agent of a pair replicates the other's belief about itself from its own past actions, and the other's costate is determined (Proposition~\ref{prop:exact}): $\hat\lambda^m_k=k_e(\epsilon-\hat s^m_k)_+$, $\hat s^m_k=-(c^m_k+\hat R^m_k)$ with $\hat R^m_k$ the replicated room; this uses $\I_m=\{i,k\}$ (Proposition~\ref{prop:local}). The two following masses are replicated in the same way, so both agents compute $\eta_{ik}=w_{ik}(\F)w_{ki}(\F)$. Transmissions are set to one.
+
+\paragraph{Exchange.} Both copies start at $0$ and each agent applies the mirrored update
+\[
+r^m_{ik}\leftarrow r^m_{ik}-\eta_{ik}\,\frac{\lambda^m_i-\hat\lambda^m_k}{2k_e},
+\]
+so $r^m_{ki}=-r^m_{ik}$ without any orientation. By Proposition~\ref{prop:transfer} a costate moves with its room at rate $k_ea^m_i\le k_e$, with equality at the wall or the speed bound, so the step $1/(2k_e)$ does not overshoot; inside the layer it is conservative by the factor $(a^m_i+a^m_k)/2$, and prices equalise only over several seconds. Agreements are kept with every sensed neighbour; toward one that does not follow, $\eta_{ik}$ falls with the belief and the agreement freezes. Theorems~\ref{thm:exchange}(ii) and \ref{thm:eq} apply to this step while $s^m_i\ge0$ and $\rho^m_{ik}\approx1$; agreements are bounded only by the reset at contact exit.
+
+\paragraph{Belief.} For each neighbour the agent stores the last $T/\Delta t=50$ approach speeds and, for each, the regime of $k$'s modelled response (pair row only, public weight $\omega=1$), linearised as $y=a_s\bar u+b_s$ in the unknown intent $\bar u$: $(a,b)=(1,0)$ unconstrained, $\big(\frac{\omega}{\omega+k_e\alpha^2},-\frac{k_e\alpha(\epsilon+R-\kappa h/2)}{\omega+k_e\alpha^2}\big)$ in the layer, $\big(0,(\frac\kappa2h-R)/\alpha\big)$ at the wall, with $R$ the room of the observed agent at that step. With the prior $\bar u\sim N(0,1)$ and noise variance $\tau+\sigma_o^2$ ($\sigma_o=0.01$), the window likelihood of each $\tau\in\{10^{-4},10^{-2},10^{-1},1\}$ is Gaussian in closed form; $\tau=\infty$ is uniform on the capability range. The prior puts $0.03$ on $\tau=\infty$ and $0.97\times(0.4,0.4,0.15,0.05)$ on the finite temperatures.
+
+\paragraph{Certified bound.} The minimisation over $\theta$ is taken over $400$ log-spaced values in $[10^{-4},50]$. A finite temperature gives $\max(c_k,r)=r+BE$, $B\sim\mathrm{Bernoulli}(q_j)$, $E\sim\mathrm{Exp}(M/\tau_j)$, with $q_j=\Phi\big((\mu_j-r)/\sigma_j\big)$, $\mu_j=\min(\alpha\hat u_j-\frac\kappa2h_{ik},r)$, $\sigma_j=\alpha\sqrt{\tau_j+v_j+\sigma_o^2}$, $(\hat u_j,v_j)$ the posterior mean and variance of the intent; $\tau=\infty$ is uniform on $-\frac\kappa2h_{ik}\pm\alpha v_{\mathrm{env}}$. Both have closed-form moment generating functions.
+
+\paragraph{Risk.} $\delta=0.05$ per contact per step: per-step risk of agent $i$ at most $K_i\delta$ (union bound). No trajectory-level guarantee is claimed (Proposition~\ref{prop:risk} would need $\delta_t=\varepsilon/T$).
+
+\paragraph{Fairness multiplier.} Each agent accumulates $W_i\leftarrow W_i+f_i\Delta t$ and sets, at every step, $\beta_i=e^{(W_i-\bar ft)/W_0}$ clipped to $[1/8,8]$ (Definition~\ref{def:beta}), with $W_0=4.22$ and $\bar f$ the mean cost rate of ours without the multiplier in the same cell and at the same $\epsilon$. Rows without the multiplier use $\beta_i=1$. Beliefs keep the public weight $\omega=1$: with $k_e\alpha^2$ of order $10^2$, a weight between $1$ and $8$ moves $a$ only between $0.006$ and $0.05$, below the observation noise of the belief. Propositions~\ref{prop:greedy}--\ref{prop:fairconv} hold while $\beta_i$ is not clipped.
+
+\begin{center}
+\small
+\begin{tabular}{llll}
+\toprule
+symbol & meaning & value & role\\
+\midrule
+$\epsilon$ & layer depth of $\Psi$ & 0.1, 0.2 & readability; effective contact distance\\
+$k_e$ & layer stiffness & 20 & readability; exchange step $1/(2k_e)$\\
+$M$ & barrier slope & 1000 & exact penalty\\
+$\delta$ & risk level & 0.05 & certified bound\\
+$T$ & belief window & 1\,s & intent held fixed\\
+$\kappa,\rho$ & barrier rate, radius & 2, 1 & specification\\
+$v_{\mathrm{env}}$ & public capability of others & per scenario & range of the hypothesis $\tau=\infty$\\
+\bottomrule
+\end{tabular}
+\end{center}
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{alg_dataflow.pdf}
+\caption{Variables of Algorithm~\ref{alg:agent} and their dependencies, as implemented.}\label{fig:dataflowimpl}
+\end{figure}
+
+\subsection{Setup}
+\paragraph{Testbed.} $N=8$ agents with single-integrator dynamics $\dot p_i=u_i$, $\|u_i\|\le1.2$, sampled at $\Delta t=0.02$\,s, travel between targets on a circle of radius $6$ and draw a new target on arrival. Each pair within sensing range $5$ shares the specification of Example~\ref{ex:ca}, $c^m=-2d_{ik}^\top(u_i-u_k)-\kappa h_{ik}\le0$, $m=\{i,k\}$, with $h_{ik}=\|d_{ik}\|^2-\rho^2$, $\rho=1$, $\kappa=2$. Costs are $f_i=\frac{\omega_i}2\|u_i-u_i^0\|^2$, $u_i^0$ the unit-speed velocity toward the target. External agents move inside the arena, reflect at radius $7$, and are never identified to the agents.
+
+\paragraph{Scenarios.} A $2\times3$ grid. Team: HOM, all $\omega_i=1$; HET, $\omega_i$ alternating $1,3$. External agents: E0 none, E4 four, E8 eight, each at speed $0.8$ with heading noise $2\,\mathrm{rad}/\sqrt{\mathrm s}$, never yielding. $v_{\mathrm{env}}=1.0$ (E0: $1.2$). A new target keeps distance at least $1.5$ from the other agents' targets.
+
+\paragraph{Methods,} grouped by information. (A) \emph{Oracle}: one central QP over all agents' inputs, every external agent at its capability bound; an upper bound, not a competitor. (B) \emph{Tan} (Tan, Liu, Johansson and Dimarogonas): multipliers exchanged by communication. It does not treat agents outside the team and is compared in E0 only. (C) own observation only: \emph{PCCA} (Jankovic and Santillo), \emph{reciprocal} (fixed half split), \emph{risk ratio} (Lyu, Luo and Dolan), and ours. Baselines are tuned on the grid: oracle $\kappa=16$; PCCA $\kappa=1$, margin $0.2$; reciprocal $\kappa=16$, margin $0.2$; risk ratio $c=150$, $\kappa=4$; Tan as published (E0). Ours: Section~\ref{sec:impl}, $\epsilon\in\{0.1,0.2\}$; with the fairness multiplier ($+\beta$), $W_0=4.22$ and $\bar f$ the mean cost rate of ours in the same cell and $\epsilon$.
+
+\paragraph{Metrics and protocol.} Three axes: fairness (spread of the paid cost $W_i(120\,\mathrm s)$, std/mean over agents), cost (mean $f_i$), violations (time with distance below $0.95\rho$, toward external agents and among agents). $24$ seeds of $120$\,s; identical seeds give identical initial conditions and external trajectories across methods; differences are paired by seed.
+
+\subsection{Results}\label{sec:prelim}
+\begin{table}[h]
+\centering\footnotesize\setlength{\tabcolsep}{3.2pt}
+\begin{tabular}{llccccccccc c}
+\toprule
+ & & \multicolumn{3}{c}{E0} & \multicolumn{3}{c}{E4} & \multicolumn{3}{c}{E8} & team\\
+\cmidrule(lr){3-5}\cmidrule(lr){6-8}\cmidrule(lr){9-11}
+ & method & cost & ext.\,\% & spread & cost & ext.\,\% & spread & cost & ext.\,\% & spread & \%\\
+\midrule
+A & oracle & .020 & -- & .34 & .073 & .19 & .36 & .123 & .52 & .33 & 0\\
+B & Tan & .024 & -- & .32 & -- & -- & -- & -- & -- & -- & .07\\
+\midrule
+C & PCCA & .042 & -- & .29 & .157 & .24 & .34 & .292 & 1.80 & .24 & 0\\
+C & reciprocal & .052 & -- & .28 & .117 & .75 & .34 & .187 & 2.59 & .31 & 0\\
+C & risk ratio & .033 & -- & .35 & .078 & 35.1 & .42 & .104 & 56.7 & .29 & .10\\
+C & ours, $\epsilon=0.1$ & .037 & -- & .31 & .141 & .01 & .35 & .227 & .76 & .28 & 0\\
+C & ours, $\epsilon=0.2$ & .041 & -- & .28 & .141 & .06 & .32 & .241 & .37 & .27 & 0\\
+C & ours $+\beta$, $\epsilon=0.1$ & .038 & -- & \textbf{.22} & .141 & .16 & \textbf{.27} & .216 & .48 & \textbf{.18} & 0\\
+C & ours $+\beta$, $\epsilon=0.2$ & .040 & -- & \textbf{.21} & .144 & .09 & \textbf{.26} & .231 & .22 & \textbf{.20} & 0\\
+\bottomrule
+\end{tabular}
+\caption{HOM team, 24 seeds of $120$\,s, means. Information: A central, B communication and identification, C own observation only. Tan does not treat agents outside the team and is compared only in E0. Cost: mean $f_i$; ext.\,\%: time below $0.95\rho$ toward external agents; spread: std/mean of the paid cost $W_i$ over agents (lowest in bold); team \%: time in violation among agents, largest over E0--E8. Standard errors: cost $\le0.02$, spread $\le0.04$, ext.\,\% $\le0.5$ (split rules $\le1.4$).}
+\label{tab:hom}
+\end{table}
+
+\begin{table}[h]
+\centering\footnotesize\setlength{\tabcolsep}{3.2pt}
+\begin{tabular}{llccccccccc c}
+\toprule
+ & & \multicolumn{3}{c}{E0} & \multicolumn{3}{c}{E4} & \multicolumn{3}{c}{E8} & team\\
+\cmidrule(lr){3-5}\cmidrule(lr){6-8}\cmidrule(lr){9-11}
+ & method & cost & ext.\,\% & spread & cost & ext.\,\% & spread & cost & ext.\,\% & spread & \%\\
+\midrule
+A & oracle & .034 & -- & .35 & .132 & .10 & .51 & .235 & .58 & .51 & 0\\
+B & Tan & .045 & -- & .38 & -- & -- & -- & -- & -- & -- & .17\\
+\midrule
+C & PCCA & .084 & -- & .57 & .310 & .24 & .59 & .602 & 1.80 & .59 & 0\\
+C & reciprocal & .103 & -- & .57 & .234 & .80 & .61 & .371 & 2.49 & .58 & .02\\
+C & risk ratio & .066 & -- & .64 & .160 & 34.2 & .63 & .206 & 56.4 & .55 & .10\\
+C & ours, $\epsilon=0.1$ & .058 & -- & .37 & .240 & .10 & .54 & .404 & 1.51 & .54 & .03\\
+C & ours, $\epsilon=0.2$ & .069 & -- & .37 & .252 & .09 & .50 & .420 & .61 & .50 & 0\\
+C & ours $+\beta$, $\epsilon=0.1$ & .061 & -- & \textbf{.26} & .243 & .34 & \textbf{.41} & .413 & 1.08 & \textbf{.41} & 0\\
+C & ours $+\beta$, $\epsilon=0.2$ & .066 & -- & \textbf{.25} & .240 & .05 & \textbf{.30} & .396 & .75 & \textbf{.33} & .05\\
+\bottomrule
+\end{tabular}
+\caption{HET team, 24 seeds of $120$\,s, means. Information: A central, B communication and identification, C own observation only. Tan does not treat agents outside the team and is compared only in E0. Cost: mean $f_i$; ext.\,\%: time below $0.95\rho$ toward external agents; spread: std/mean of the paid cost $W_i$ over agents (lowest in bold); team \%: time in violation among agents, largest over E0--E8. Standard errors: cost $\le0.02$, spread $\le0.04$, ext.\,\% $\le0.5$ (split rules $\le1.4$).}
+\label{tab:het}
+\end{table}
+
+\paragraph{Violations.} Among agents ours stays at or below $0.05\%$ in every cell. Tan (E0) has $0.07\pm0.06\%$ (HOM) and $0.17\pm0.11\%$ (HET), against $0$ for ours. Toward external agents ours at $\epsilon=0.2$ is at $0.06$--$0.61\%$, at the level of the oracle ($0.10$--$0.58\%$); PCCA reaches $1.80\%$, the reciprocal split $2.6\%$, and the risk ratio $34$--$57\%$. At $\epsilon=0.1$ ours reaches $1.51\%$ in HET-E8.
+
+\paragraph{Cost.} The oracle is the lower bound. Within group C ours costs less than PCCA in every cell; the reciprocal and risk-ratio splits are cheaper with external agents, at $0.75$--$57\%$ violation. The gap of ours ($\epsilon=0.1$) to the oracle is $0.017$--$0.169$; the coverage of uncertain neighbours, measured against ours with $U=0$ given full information, accounts for at most a third of it.
+
+\paragraph{Fairness.} The multiplier lowers the spread against ours at the same $\epsilon$ in all six cells and at both depths, by $0.07$--$0.20$ (each at least three standard errors), with the cost within $\pm0.024$ and no significant change in violation toward external agents. Ours$+\beta$ has the lowest spread of all methods in every cell.
+
+\paragraph{Force chain.} Table~\ref{tab:transfer} checks Proposition~\ref{prop:transfer} in three geometries: an external agent $e$ pushes agent $0$ toward its teammate $1$, orthogonally, or from the teammate's side. The predicted sensitivity of the contact force between the teammates to the load matches finite differences to four decimals, including its sign. In a snapshot of scenario S4 (Appendix~\ref{app:s14}) at maximal total pressure, the virial pressure $P_i$ concentrates on one agent ($P=39$, the others $0$--$1$).
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{lcc}
+\toprule
+geometry & \multicolumn{2}{c}{$\partial\lambda^{m'}_0/\partial R^m_0$, $m=\{0,e\}$, $m'=\{0,1\}$}\\
+\cmidrule(lr){2-3}
+ & predicted & finite diff.\\
+\midrule
+toward teammate & $+9.9155$ & $+9.9155$\\
+orthogonal & 0 & 0\\
+same side & $-0.1238$ & $-0.1238$\\
+\bottomrule
+\end{tabular}
+\caption{Load transfer through a contact (Proposition~\ref{prop:transfer}).}
+\label{tab:transfer}
+\end{table}
+
+\paragraph{Approximations.} Agreements are kept with every sensed neighbour, so the guarantees of Section~\ref{sec:external} hold up to the room floor of Proposition~\ref{prop:load}(i), and transmissions are set to one in the exchange.
+
+\subsection{Fairness over time}\label{sec:fairnum}
+Twelve seeds of $600$\,s per cell, ours with and without the multiplier at both depths (Table~\ref{tab:fair}, Figure~\ref{fig:fair}).
+
+\begin{table}[h]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lcccccc}
+\toprule
+ & \multicolumn{3}{c}{$\epsilon=0.1$} & \multicolumn{3}{c}{$\epsilon=0.2$}\\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+cell & spread & paired diff. & ext.\,\% & spread & paired diff. & ext.\,\%\\
+\midrule
+HOM-E0 & .118 $\to$ .058 & $-.060\pm.012$ & -- & .127 $\to$ .067 & $-.061\pm.010$ & --\\
+HOM-E4 & .188 $\to$ .071 & $-.116\pm.018$ & .03 $\to$ .20 & .140 $\to$ .052 & $-.088\pm.014$ & .01 $\to$ .06\\
+HOM-E8 & .115 $\to$ .043 & $-.072\pm.011$ & .65 $\to$ .85 & .115 $\to$ .043 & $-.072\pm.011$ & .44 $\to$ .48\\
+HET-E0 & .212 $\to$ .074 & $-.138\pm.024$ & -- & .247 $\to$ .087 & $-.159\pm.014$ & --\\
+HET-E4 & .407 $\to$ .224 & $-.183\pm.027$ & .08 $\to$ .10 & .399 $\to$ .182 & $-.218\pm.020$ & .08 $\to$ .06\\
+HET-E8 & .443 $\to$ .298 & $-.145\pm.015$ & .84 $\to$ 1.20 & .411 $\to$ .233 & $-.178\pm.012$ & .56 $\to$ .79\\
+\bottomrule
+\end{tabular}
+\caption{Spread of the paid cost at $600$\,s and time in violation toward external agents, ours $\to$ ours$+\beta$; $12$ seeds, paired difference of the spread $\pm$ standard error.}
+\label{tab:fair}
+\end{table}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=0.47\linewidth,height=5.2cm,xlabel={time [s]},ylabel={range of paid cost},title={HOM-E8},xmin=100,xmax=620,ymin=0,
+  legend pos=north west,legend style={font=\scriptsize,draw=none,fill=none},tick label style={font=\scriptsize},label style={font=\small},title style={font=\small}]
+\addplot+[mark=*,blue,error bars/.cd,y dir=both,y explicit] coordinates {(120,27.4)+-(0,2.1) (240,35.7)+-(0,3.2) (360,37.1)+-(0,3.3) (480,44.4)+-(0,4.0) (600,48.6)+-(0,4.8)};
+\addplot+[mark=square*,red,error bars/.cd,y dir=both,y explicit] coordinates {(120,14.0)+-(0,1.6) (240,21.5)+-(0,1.4) (360,18.9)+-(0,2.3) (480,21.0)+-(0,1.3) (600,18.2)+-(0,2.3)};
+\addplot+[mark=o,blue,dashed,error bars/.cd,y dir=both,y explicit] coordinates {(120,24.3)+-(0,1.9) (240,34.1)+-(0,3.3) (360,42.7)+-(0,3.8) (480,50.1)+-(0,4.6) (600,52.4)+-(0,4.4)};
+\addplot+[mark=square,red,dashed,error bars/.cd,y dir=both,y explicit] coordinates {(120,18.0)+-(0,1.2) (240,20.1)+-(0,1.4) (360,17.6)+-(0,1.4) (480,18.3)+-(0,1.4) (600,18.6)+-(0,2.0)};
+\legend{ours $\epsilon{=}0.1$,$+\beta$ $\epsilon{=}0.1$,ours $\epsilon{=}0.2$,$+\beta$ $\epsilon{=}0.2$}
+\end{axis}
+\end{tikzpicture}\hfill
+\begin{tikzpicture}
+\begin{axis}[width=0.47\linewidth,height=5.2cm,xlabel={time [s]},title={HET-E8},xmin=100,xmax=620,ymin=0,
+  tick label style={font=\scriptsize},label style={font=\small},title style={font=\small}]
+\addplot+[mark=*,blue,error bars/.cd,y dir=both,y explicit] coordinates {(120,84.1)+-(0,5.6) (240,134.6)+-(0,8.3) (360,189.9)+-(0,7.0) (480,240.4)+-(0,9.7) (600,278.4)+-(0,9.3)};
+\addplot+[mark=square*,red,error bars/.cd,y dir=both,y explicit] coordinates {(120,61.0)+-(0,5.6) (240,94.1)+-(0,4.4) (360,125.8)+-(0,6.7) (480,159.8)+-(0,7.8) (600,200.0)+-(0,10.8)};
+\addplot+[mark=o,blue,dashed,error bars/.cd,y dir=both,y explicit] coordinates {(120,70.1)+-(0,6.1) (240,127.0)+-(0,6.4) (360,176.0)+-(0,5.6) (480,222.4)+-(0,4.2) (600,265.5)+-(0,6.4)};
+\addplot+[mark=square,red,dashed,error bars/.cd,y dir=both,y explicit] coordinates {(120,49.6)+-(0,4.8) (240,76.0)+-(0,5.7) (360,91.5)+-(0,5.9) (480,122.7)+-(0,7.8) (600,150.3)+-(0,7.9)};
+\end{axis}
+\end{tikzpicture}
+\caption{Range $\max_iW_i-\min_iW_i$ of the paid cost over time ($12$ seeds of $600$\,s, standard errors).}
+\label{fig:fair}
+\end{figure}
+
+The multiplier lowers the spread at $600$\,s in all six cells at both depths, by $0.06$--$0.22$ (each at least four standard errors), with the cost within $\pm0.04$ and violation among agents at most $0.02\%$. Without it the range grows throughout. With it the range levels off in the three HOM cells and in HET-E0, as Proposition~\ref{prop:fairconv} predicts (HOM-E8: $17$--$22$ from $240$\,s on), and keeps growing in HET-E4 and HET-E8 at $0.4$ to $0.7$ of the rate without. In the E8 cells violation toward external agents is slightly higher with the multiplier, by $0.04$--$0.36$ percentage points, none beyond two standard errors (HET-E8: $1.20$ against $0.84\%$ at $\epsilon=0.1$, $0.79$ against $0.56\%$ at $\epsilon=0.2$).
+
+\section{Extensions and limits}\label{sec:limits}
+\paragraph{Joint feasibility.} Pairwise viability is a specification; the viability of a group is not separable. If at every step the central problem with every object at its capability bound is feasible, the usages of a central solution define agreements under which all local problems are feasible. Replacing $E_i$ by a cost-to-go $\min_{\pi_i}\E_{w_i}[\sum_t\gamma^t(f_i+\Psi(s_{i,t}))]$ puts future barrier payments into the present energy.
+
+\paragraph{Time scale of fairness.} Before a share is active an agent applies its unconstrained optimum, so its behaviour does not depend on its private cost; no rule can reflect private weights before activation, and in a symmetric encounter the costate imbalance at first activation is at least $|\omega_a-\omega_b|/(\omega_a+\omega_b)$ for one ordering. After activation the imbalance decays at the exchange rate, so in short encounters it is limited by the tracking of Theorem~\ref{thm:track}.
+
+A faster exchange shortens that time, but it cannot be made fast toward every neighbour at once, because a neighbour that follows the convention and one that never yields cannot be told apart until their share is tested (Section~\ref{sec:beliefconc}). The trade-off has the form of a speed limit.
+
+\begin{proposition}[Fairness and exposure]\label{prop:bh}
+Fix an encounter of agent $i$ with a neighbour $k$ and two laws for $k$'s actions: $P_\F$, under which $k$ follows the convention and the equilibrium agreement is $r^\star_{ik}=\Delta^\star$, and $P_{\mathrm{out}}$, under which $k$ never yields and $i$'s problem stays feasible only while the share it leaves satisfies $r_{ik}<\bar r$ (beyond $\bar r$ its room exceeds what it can absorb), with $\bar r<\Delta^\star$. Let $r_{ik}(n)$ be set by any rule from $i$'s observations over the first $n$ steps after activation. Then
+\[
+\underbrace{P_\F\big(r_{ik}(n)<\bar r\big)}_{\text{fairness not reached}}+\underbrace{P_{\mathrm{out}}\big(r_{ik}(n)\ge\bar r\big)}_{\text{exposure}}\ \ge\ \tfrac12\exp\!\big(-\mathrm{KL}_n\big),\qquad
+\mathrm{KL}_n:=\mathrm{KL}\big(P_\F^n\,\big\|\,P_{\mathrm{out}}^n\big)=\sum_{t\le n}\E_{P_\F}\big[\mathrm{KL}(P_{\F,t}\,\|\,P_{\mathrm{out},t}\mid\text{past})\big].
+\]
+In particular, if the per-step divergence is at most $D$ and the fair share is to be reached within time $T$ with total error $P$,
+\[
+T\cdot\frac{D}{\Delta t}\ \ge\ \ln\frac1{2P}.
+\]
+Before activation the two laws coincide, $\mathrm{KL}=0$, and the sum of the two errors is at least $\tfrac12$.
+\end{proposition}
+\begin{proof}
+The event $\{r_{ik}(n)\ge\bar r\}$ is determined by the first $n$ observations, so the Bretagnolle--Huber inequality $P(A^c)+Q(A)\ge\frac12e^{-\mathrm{KL}(P\|Q)}$ applies to the laws of those observations; the sum form is the chain rule of the divergence. With $\mathrm{KL}_n\le nD$ and $n=T/\Delta t$ the second form follows.
+\end{proof}
+
+The bound holds for every rule that uses observations only, ours included; it says nothing about how close a given rule comes to it. Information plays the role that energy plays in the time--energy relation: a neighbour can be treated fairly quickly only as fast as its behaviour reveals whether it can be trusted. Before its share is active a neighbour that never yields gives no information at all, so no rule can be both fair to cooperating neighbours and safe against untested ones from the first step. Exposure here is yielding too much, not too little: a neighbour that never yields reads as one with a high costate, and the exchange keeps leaving it room. Before it is tested it is indistinguishable from a cooperating neighbour with a large private weight, whose fair share is large. The premise $m<\Delta^\star$ therefore holds when the weights the convention admits are large enough that their fair share exceeds the feasibility margin; with a public weight bound $\bar\omega$ such that $\Delta^\star(\bar\omega)<m$, no conflict arises, and a rule that never leaves more than $\Delta^\star(\bar\omega)$ is both fair and feasible.
+
+
+\paragraph{Fairness over time.} Proposition~\ref{prop:fairconv} assumes fixed contacts and the existence of a balanced profile, for which only the necessary condition (iii) is given; with contacts that form and break the evidence is numerical (Section~\ref{sec:fairnum}). The multiplier needs the scale $\bar f$ of the scenario as a public constant.
+
+\paragraph{Liveness.} The equilibria of Section~\ref{sec:exchange} concern the split at a given state, not the closed loop. As for any one-step safety filter, the projection of an agent's preferred input onto its admissible set can vanish when neighbours bound it on both sides of its goal, and the closed loop can rest at a point that is not a goal (a deadlock). Agents that choose only their own inputs cannot account for a neighbour that would step aside; joint methods can. Breaking such configurations, by a public passing rule as a specification or by a cost-to-go energy, is left open.
+
+\paragraph{Open.} Readability without mutual trust; constraints shared by three or more agents whose members do not observe each other (Assumption~\ref{ass:allow}); constraints not separable in the decisions; second-order dynamics; allotting the risk across contacts in closed loop (Proposition~\ref{prop:temp}); exchange of risk, and thermal equilibrium, between agents.
+
+
+\appendix
+\section{Other specifications}\label{sec:specs}
+The construction uses only that the constraint is separable and convex. Each specification gets its own slack and price, and the local problem becomes $\min_{u_i}\beta_if_i+\sum_{m\in\mathcal M_i}\Psi(s^m_i)$ of \eqref{eq:local}.
+
+Collision avoidance (Example~\ref{ex:ca}) is one instance; two more follow.
+
+\begin{example}[Speed uniformity]
+$|v_i-v_k|\le\epsilon_v$: the pair $c_\pm=\pm(v_i-v_k)-\epsilon_v$, with terms $\pm v_i-\frac{\epsilon_v}2$.
+\end{example}
+
+\begin{example}[Pairwise viability]
+With $V$ the reachability value function of a pair under input bounds and a worst-case neighbour, $c=-(\dot V+\kappa V)$ is linear in the inputs and keeps the pair inside the set from which its constraint can be met forever.
+\end{example}
+\section{Scenarios S1--S4}\label{app:s14}
+An earlier study on four scenarios, six seeds of $120$\,s, with ours at $\epsilon\in\{0.1,0.2,0.3\}$; testbed as in Section~\ref{sec:num}, targets drawn without separation.
+
+\paragraph{Scenarios.}
+\begin{center}
+\small
+\begin{tabular}{>{\raggedright}p{0.1\linewidth}>{\raggedright}p{0.3\linewidth}>{\raggedright}p{0.13\linewidth}>{\raggedright\arraybackslash}p{0.33\linewidth}}
+\toprule
+ & external agents & weights $\omega_i$ & question\\
+\midrule
+S1 Fleet & none & alternating 1, 3 & efficiency and price fairness among cooperating agents\\
+S2 Reactive & 8, speed 0.8, heading noise $2\,\mathrm{rad}/\sqrt{\mathrm s}$, own avoidance & 1 & safety when outsiders avoid on their own\\
+S3 Mild & 4, speed 0.5, heading noise 2, never yield & 1 & safety when robust feasibility holds throughout\\
+S4 Harsh & 8, speed 0.8, heading noise 2, never yield & 1 & behaviour when robust feasibility fails part of the time\\
+\bottomrule
+\end{tabular}
+\end{center}
+The public capability of external agents is $v_{\mathrm{env}}=1.0$ in S2 and S4 and $0.6$ in S3. In S2 each external agent adds to its heading a repulsion from bodies within distance $2$.
+
+\paragraph{Methods.} \emph{Ours}: $\Psi$ with layer $\epsilon\in\{0.1,0.2,0.3\}$, $k_e=20$, $M=1000$; $\delta=0.05$; belief window $T=1$\,s; prior mass $w_0\in\{1,0.99,0.97,0.9\}$ on the following hypotheses (tables: $w_0=0.97$); one rule for every neighbour (Sections~\ref{sec:exchange} and \ref{sec:impl}). \emph{Tan}: multipliers exchanged over the communication graph; compared in S1 only, since it does not treat agents outside the team. \emph{PCCA}: predictor--corrector collision avoidance (Jankovic and Santillo), original form adapted to single integrators. \emph{Risk ratio}: responsibility $\omega_i=R_j/(R_i+R_j)$ (Lyu, Luo and Dolan). \emph{Reciprocal}: fixed half split. \emph{Oracle}: one central QP over all agents' inputs, every external agent at its capability bound, same barrier.
+
+\paragraph{Metrics.} Cost: mean of $f_i$ over agents and time. Safety toward external agents: minimum distance and fraction of time with distance below $0.95\rho$. Safety among agents: minimum distance and fraction of time in violation. Price imbalance (S1): in isolated two-agent encounters, $|\mu_i-\mu_k|/(\mu_i+\mu_k)$ with $\mu_i$ the realised price of agent $i$, overall and for pairs of equal and of different weights. Agreement gap: $|r_{ik}+r_{ki}|$ over all agreements.
+
+\paragraph{Protocol.} Six seeds of $120$\,s per scenario and method; identical seeds give identical initial conditions and external trajectories across methods.
+
+\paragraph{Questions.} Q1 (S2, S3): where the oracle has no violation, does ours have none? Q2 (S4): how far is ours from the oracle when robust feasibility fails? Q3 (S1): how close to the central optimum and to equal prices, without messages? Q4 (S3, S4): what is the cost--safety trade-off over $\epsilon$?
+
+All runs use the exchange of Definition~\ref{def:exchange} with the step $1/(2k_e)$, the belief of Section~\ref{sec:impl}, and $\delta=0.05$ on every neighbour; six seeds of $120$\,s, mean $\pm$ standard error, minimum distances over all seeds, violation counted below $0.95\rho$.
+
+\paragraph{Q1: where the oracle has no violation.} In S2 and S3 ours has no violation, toward external agents or among agents, at every layer depth and every prior $w_0$ (Table~\ref{tab:s23}); its minimum distance to external agents in S3 is $1.04$--$1.11$. PCCA violates in both, the reactive and risk-ratio splits by 2--34\%.
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{lcccccc}
+\toprule
+ & \multicolumn{3}{c}{S2 reactive} & \multicolumn{3}{c}{S3 mild}\\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+method & cost & ext.\ viol. & team viol. & cost & ext.\ viol. & team viol.\\
+\midrule
+oracle & 0.139 & 0 & 0 & 0.128 & 0 & 0\\
+PCCA & 0.043 & 0.22\% & 0 & 0.085 & 1.01\% & 0\\
+risk ratio & 0.142 & 1.91\% & 0 & 0.131 & 33.9\% & 0\\
+reciprocal & 0.073 & 3.04\% & 0 & 0.102 & 30.8\% & 0\\
+ours, $\epsilon=0.1$ & 0.128 & 0 & 0 & 0.113 & 0 & 0\\
+ours, $\epsilon=0.2$ & 0.145 & 0 & 0 & 0.124 & 0 & 0\\
+ours, $\epsilon=0.3$ & 0.164 & 0 & 0 & 0.160 & 0 & 0\\
+\bottomrule
+\end{tabular}
+\caption{Scenarios in which robust feasibility holds. Time in violation toward external agents and among agents.}
+\label{tab:s23}
+\end{table}
+
+\paragraph{Q2: when robust feasibility fails.} In S4 the oracle itself violates 0.87\% of the time toward external agents. On average ours stays below it at every layer depth, 0.70\%, 0.53\% and 0.17\% for $\epsilon=0.1,0.2,0.3$, at cost $0.244$--$0.281$ against $0.255$; PCCA violates 6.12\%, and the reactive and risk-ratio splits 56\% and 65\% (Table~\ref{tab:s4}). Among agents ours has at most 0.04\%. Over the prior sweep the external violation stays within 0--0.75\%.
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{lccccc}
+\toprule
+method & cost & \multicolumn{2}{c}{among agents} & \multicolumn{2}{c}{toward external agents}\\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+ & & min.\ dist. & viol. & min.\ dist. & viol.\\
+\midrule
+oracle & $0.255\pm0.011$ & 0.91 & $0.07\pm0.08\%$ & 0.06 & $0.87\pm0.64\%$\\
+PCCA & $0.164\pm0.014$ & 0.82 & $0.12\pm0.07\%$ & 0.51 & $6.12\pm1.68\%$\\
+risk ratio & $0.165\pm0.022$ & 0.93 & $0.07\pm0.07\%$ & 0.01 & $65.0\pm3.7\%$\\
+reciprocal & $0.161\pm0.024$ & 0.93 & $0.06\pm0.06\%$ & 0.05 & $56.1\pm2.0\%$\\
+ours, $\epsilon=0.1$ & $0.244\pm0.016$ & 0.93 & $0.04\pm0.04\%$ & 0.32 & $0.70\pm0.35\%$\\
+ours, $\epsilon=0.2$ & $0.281\pm0.017$ & 1.02 & 0 & 0.38 & $0.53\pm0.23\%$\\
+ours, $\epsilon=0.3$ & $0.277\pm0.016$ & 1.13 & 0 & 0.49 & $0.17\pm0.16\%$\\
+\bottomrule
+\end{tabular}
+\caption{S4, eight non-yielding external agents.}
+\label{tab:s4}
+\end{table}
+
+\paragraph{Q3: efficiency and fairness without messages.} In S1 the agreements stay exactly opposite ($\max|r_{ik}+r_{ki}|=0$). Ours costs $0.086$ at $\epsilon=0.1$ and $0.2$, below the oracle (whose cost is raised by a deadlock in one seed) and $1.57$ times the cost of Tan, which exchanges multipliers by communication; PCCA is at $0.056$. The price imbalance of ours is $0.27$--$0.35$ (equal weights $0.17$--$0.29$, weights 1 and 3 $0.40$--$0.42$), below the reciprocal and risk-ratio splits ($0.38$--$0.42$) and above Tan ($0.14$) and PCCA ($0.10$). With the step $1/(2k_e)$, prices equalise over several seconds (Section~\ref{sec:impl}).
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{lcccccc}
+\toprule
+method & cost & / oracle & / Tan & \multicolumn{3}{c}{price imbalance}\\
+\cmidrule(lr){5-7}
+ & & & & all & equal $\omega$ & $\omega$ 1 vs 3\\
+\midrule
+oracle & 0.102 & 1.00 & 1.85 & 0 & 0 & 0\\
+Tan & 0.055 & 0.54 & 1.00 & 0.14 & 0.10 & 0.16\\
+PCCA & 0.056 & 0.55 & 1.01 & 0.10 & 0.09 & 0.10\\
+risk ratio & 0.124 & 1.21 & 2.24 & 0.42 & 0.30 & 0.51\\
+reciprocal & 0.124 & 1.21 & 2.25 & 0.38 & 0.25 & 0.52\\
+ours, $\epsilon=0.1$ & 0.086 & 0.85 & 1.57 & 0.35 & 0.29 & 0.41\\
+ours, $\epsilon=0.2$ & 0.086 & 0.84 & 1.55 & 0.34 & 0.25 & 0.42\\
+ours, $\epsilon=0.3$ & 0.121 & 1.19 & 2.19 & 0.27 & 0.17 & 0.40\\
+\bottomrule
+\end{tabular}
+\caption{S1, cooperating fleet with weights 1 and 3.}
+\label{tab:s1}
+\end{table}
+
+\paragraph{Q4: trade-off.} The layer depth trades cost for margin (Fig.~\ref{fig:tradeoff}). An agent at rest already pays the price inside the distance $\sqrt{1+2\epsilon/\kappa}$ from a neighbour ($1.05$ for $\epsilon=0.1$, $1.14$ for $\epsilon=0.3$), which acts as an effective contact distance and gives a margin of anticipation against non-yielding agents. In S4 the three depths lie at or below the oracle in violation at comparable cost, and one to two orders of magnitude below PCCA and the split rules.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=0.75\linewidth,height=0.42\linewidth,xmode=log,xmin=0.008,xmax=120,ymin=0.12,ymax=0.31,
+ xlabel={time in violation toward external agents (\%)},ylabel={cost},
+ legend style={font=\scriptsize,at={(1.02,1)},anchor=north west},tick label style={font=\scriptsize},label style={font=\small}]
+\addplot+[only marks,mark=*,blue,error bars/.cd,x dir=both,x explicit,y dir=both,y explicit] coordinates {(0.70,0.244)+-(0.35,0.016) (0.53,0.281)+-(0.23,0.017) (0.17,0.277)+-(0.16,0.016)};
+\addplot+[only marks,mark=star,mark size=4pt,black,error bars/.cd,x dir=both,x explicit,y dir=both,y explicit] coordinates {(0.87,0.255)+-(0.64,0.011)};
+\addplot+[only marks,mark=diamond*,red,error bars/.cd,x dir=both,x explicit,y dir=both,y explicit] coordinates {(6.12,0.164)+-(1.68,0.014)};
+\addplot+[only marks,mark=triangle*,orange,error bars/.cd,x dir=both,x explicit,y dir=both,y explicit] coordinates {(65.0,0.165)+-(3.7,0.022) (56.1,0.161)+-(2.0,0.024)};
+\legend{{ours, $\epsilon=0.1,0.2,0.3$},oracle,PCCA,risk ratio / reciprocal}
+\node[font=\scriptsize,anchor=east] at (axis cs:0.70,0.236) {0.1};
+\node[font=\scriptsize,anchor=west] at (axis cs:0.53,0.289) {0.2};
+\node[font=\scriptsize,anchor=east] at (axis cs:0.17,0.285) {0.3};
+\end{axis}
+\end{tikzpicture}
+\caption{S4: cost against time in violation toward external agents (six seeds, standard errors; logarithmic horizontal axis).}
+\label{fig:tradeoff}
+\end{figure}
+
+
+
+\section*{Changes from v42}
+\begin{itemize}
+\item Order only: no statement, proof or number is changed. The sections follow the blocks of Figure~\ref{fig:dataflow}: at a glance (Section~\ref{sec:glance}); the local problem (Section~\ref{sec:localp}); belief and room (Section~\ref{sec:safety}); exchange (Section~\ref{sec:dual}); the laws that follow, equilibrium and fairness over time (Section~\ref{sec:laws}); the thermodynamic reading (Section~\ref{sec:thermo}); closed loop; numerical study with the implementation (Section~\ref{sec:impl}); limits. Other specifications moved to Appendix~\ref{sec:specs}. Figure~\ref{fig:dataflow} is the general data flow; the implemented one is Figure~\ref{fig:dataflowimpl}.
+\item Removed what the algorithm does not use: the fairness study on S1 and S4 with the multiplier held per contact (superseded by Section~\ref{sec:fairnum}); the risk floor in Section~\ref{sec:temp}; scenario constants of S1 and S4 in the implementation of the multiplier; the layer depth $0.3$ and the symbol $g_{\max}$ in the table of constants. Proof of Proposition~\ref{prop:transfer}: $\omega_i$ throughout.
+item Indices: $j,k$ always denote agents and $m$ a constraint. Quantities of a constraint are written $R^m_i$, $s^m_i$, $\lambda^m_i$, those of a member within it $r^m_{ik}$, $U^m_{ik}$, $\rho^m_{ik}$; the index $m$ is dropped where one constraint is treated. The mutual trust is $\eta_{ik}$, the contact force $\phi^m_i$, the risk weight of a contact $\nu^m_i$.
+\end{itemize}
+
+\end{document}

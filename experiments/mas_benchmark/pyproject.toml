@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mas_benchmark"
+version = "0.1.0"
+description = "Multi-agent collision-avoidance benchmark: shared coupled constraints without communication (thermo_mas v40)"
+requires-python = ">=3.11"
+
+[tool.setuptools.packages.find]
+where = ["src"]
